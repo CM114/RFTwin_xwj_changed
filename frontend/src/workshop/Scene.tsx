@@ -1,13 +1,13 @@
-import { Html, Line, OrbitControls } from "@react-three/drei";
+import { Line, OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Copy } from "./copy";
-import { AMR, Lathe, Mill, Robot, StaticAsset, ZoneSign } from "./Objects";
-import { AMR_PATH, ASSETS } from "./model";
+import { AMR, Lathe, Mill, Robot, StaticAsset, WorldPlate, ZoneSign } from "./Objects";
+import { AMR_PATH, ASSETS, PROCESS_PATH, PROCESS_STAGES, processPose } from "./model";
 import type { SimulationState, WorkshopAsset } from "./model";
 
-type ViewMode = "orbit" | "top";
+type ViewMode = "orbit" | "top" | "focus";
 
 const zoneLabels = {
   raw: { zh: "01 原料收货", en: "01 RECEIVING & STOCK", color: "#d2a75a" },
@@ -22,13 +22,7 @@ const zoneLabels = {
 function WorkshopFloor({ lang, labels, routes }: {
   lang: "zh" | "en"; labels: boolean; routes: boolean;
 }) {
-  const routeA = useMemo(() => [
-    [-20, 0.13, -8], [-12, 0.13, -8], [-3, 0.13, -8], [14, 0.13, 8],
-    [20, 0.13, 8], [13, 0.13, -8], [20, 0.13, -8],
-  ] as [number, number, number][], []);
-  const routeB = useMemo(() => [
-    [-20, 0.16, -8], [-3, 0.16, -8], [14, 0.16, 8], [13, 0.16, -8], [20, 0.16, -8],
-  ] as [number, number, number][], []);
+  const processLine = useMemo(() => PROCESS_PATH.map(([x, z]) => [x, 0.14, z] as [number, number, number]), []);
   return <group>
     <mesh receiveShadow rotation-x={-Math.PI / 2} position={[0, -0.14, 0]}>
       <planeGeometry args={[48, 30]} />
@@ -60,12 +54,12 @@ function WorkshopFloor({ lang, labels, routes }: {
     <FloorBay position={[20, -8]} size={[5.4, 7]} color="#d4ad69" />
     <FloorBay position={[-20, 9.8]} size={[5.4, 9]} color="#9aadb2" />
     {routes && <>
-      <Line points={routeA} color="#77dfb9" lineWidth={2.1} dashed dashSize={0.5} gapSize={0.36} />
-      <Line points={routeB} color="#78cce5" lineWidth={1.6} dashed dashSize={0.28} gapSize={0.38} />
-      <RouteArrow from={[-17, 0.16, -8]} to={[-14.8, 0.16, -8]} color="#77dfb9" />
-      <RouteArrow from={[-0.6, 0.16, -8]} to={[1.1, 0.16, -8]} color="#77dfb9" />
-      <RouteArrow from={[13.1, 0.18, 8]} to={[13.7, 0.18, 7.2]} color="#77dfb9" />
-      <RouteArrow from={[17.5, 0.16, -8]} to={[19, 0.16, -8]} color="#78cce5" />
+      <Line points={processLine} color="#72dfb9" lineWidth={2.4} dashed dashSize={0.62} gapSize={0.3} />
+      {PROCESS_STAGES.map(({ id, position }) => <ProcessStation key={id} id={id} position={position} />)}
+      <RouteArrow from={[-17, 0.19, -8]} to={[-15, 0.19, -8]} color="#72dfb9" />
+      <RouteArrow from={[-1, 0.19, 13]} to={[1, 0.19, 13]} color="#72dfb9" />
+      <RouteArrow from={[22, 0.19, 3]} to={[22, 0.19, 1]} color="#72dfb9" />
+      <RouteArrow from={[16, 0.19, -8]} to={[18, 0.19, -8]} color="#72dfb9" />
     </>}
     <AisleMarks />
     {labels && Object.entries(zoneLabels).map(([zone, entry]) => {
@@ -73,11 +67,11 @@ function WorkshopFloor({ lang, labels, routes }: {
         raw: [-20, -13.45], turning: [-10, -4.6], milling: [-2, 12.65], post: [17, 4.1],
         quality: [13, -11.2], finished: [20, -12.45], support: [-20, 14],
       };
-      return <ZoneSign key={zone} position={places[zone]} label={lang === "zh" ? entry.zh : entry.en} color={entry.color} />;
+      return <ZoneSign key={zone} position={places[zone]} rotationY={places[zone][1] > 0 ? Math.PI : 0}
+        label={lang === "zh" ? entry.zh : entry.en} color={entry.color} />;
     })}
-    {labels && <Html position={[0, 0.12, -1.48]} center distanceFactor={38} occlude={false}>
-      <span className="aisle-label">{lang === "zh" ? "AGV · AMR 共用物流通道" : "AGV · AMR LOGISTICS AISLE"}</span>
-    </Html>}
+    {labels && <WorldPlate name="aisle-label" position={[0, 0.16, -1.48]} rotation={[-Math.PI / 2, 0, 0]}
+      size={[4.6, 0.38]} title={lang === "zh" ? "AGV · AMR 共用物流通道" : "AGV · AMR LOGISTICS AISLE"} accent="#74c9b1" />}
   </group>;
 }
 
@@ -124,6 +118,29 @@ function RouteArrow({ from, to, color }: {
   </mesh>;
 }
 
+function ProcessStation({ id, position }: { id: string; position: [number, number] }) {
+  return <mesh name={`process-station-${id}`} position={[position[0], 0.19, position[1]]} rotation-x={-Math.PI / 2}>
+    <ringGeometry args={[0.48, 0.57, 32]} />
+    <meshBasicMaterial color="#9cf2d4" transparent opacity={0.9} side={THREE.DoubleSide} />
+  </mesh>;
+}
+
+function Workpiece({ elapsed }: { elapsed: number }) {
+  const pose = processPose(elapsed + 14);
+  return <group position={[pose.position[0], 0.48, pose.position[1]]} rotation-y={-pose.heading}>
+    <mesh castShadow position={[0, 0.08, 0]}><boxGeometry args={[0.95, 0.13, 0.72]} />
+      <meshStandardMaterial color="#386b61" metalness={0.42} roughness={0.3} /></mesh>
+    <mesh castShadow rotation-z={Math.PI / 2} position={[0, 0.31, 0]}>
+      <cylinderGeometry args={[0.18, 0.18, 0.72, 20]} />
+      <meshStandardMaterial color="#d7e2de" metalness={0.88} roughness={0.19} emissive="#477f72" emissiveIntensity={0.12} />
+    </mesh>
+    <mesh castShadow rotation-z={Math.PI / 2} position={[-0.26, 0.31, 0]}>
+      <cylinderGeometry args={[0.24, 0.24, 0.12, 20]} />
+      <meshStandardMaterial color="#a8b7b0" metalness={0.82} roughness={0.23} />
+    </mesh>
+  </group>;
+}
+
 function Roof({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return <group>
@@ -146,20 +163,26 @@ function Backdrop({ lang }: { lang: "zh" | "en" }) {
       <boxGeometry args={[47.5, 8.2, 0.32]} /><meshStandardMaterial color="#252f33" roughness={0.83} /></mesh>
     <mesh position={[0, 8.28, -14.82]}>
       <boxGeometry args={[47.2, 0.16, 0.4]} /><meshStandardMaterial color="#526064" metalness={0.47} roughness={0.45} /></mesh>
-    <Html position={[-18, 7.8, -14.68]} transform distanceFactor={28} occlude={false}>
-      <div className="wall-brand">{lang === "zh" ? "精密制造 · 单元 A" : "PRECISION MACHINING · CELL A"}</div>
-    </Html>
+    <WorldPlate name="wall-brand" position={[-18, 7.8, -14.68]} size={[5.8, 1.05]}
+      title={lang === "zh" ? "精密制造 · 单元 A" : "PRECISION MACHINING · CELL A"} accent="#70d8b6" />
   </>;
 }
 
-function CameraRig({ view, controls }: { view: ViewMode; controls: React.RefObject<any> }) {
+function CameraRig({ view, controls, focusPosition }: {
+  view: ViewMode; controls: React.RefObject<any>; focusPosition?: [number, number];
+}) {
+  const target = useMemo(() => view === "focus" && focusPosition
+    ? new THREE.Vector3(focusPosition[0], 1.45, focusPosition[1])
+    : new THREE.Vector3(0, 0, 0), [view, focusPosition]);
   const eye = useMemo(() => view === "top"
     ? new THREE.Vector3(0, 60, 0.015)
-    : new THREE.Vector3(35, 38, 43), [view]);
-  const target = useMemo(() => new THREE.Vector3(0, 0, 0), []);
-  useEffect(() => {
+    : view === "focus"
+      ? target.clone().add(new THREE.Vector3(6, 3.2, 10))
+      : new THREE.Vector3(35, 38, 43), [view, target]);
+  useLayoutEffect(() => {
     const control = controls.current;
     if (!control) return;
+    control.minDistance = view === "focus" ? 5 : 16;
     control.target.copy(target);
     control.object.position.copy(eye);
     control.update();
@@ -168,11 +191,11 @@ function CameraRig({ view, controls }: { view: ViewMode; controls: React.RefObje
 }
 
 export function WorkshopScene({
-  lang, state, selectedId, onSelect, showLabels, showRoutes, view, copy, onReady,
+  lang, state, selectedId, onSelect, showLabels, showRoutes, view, focusPosition, copy, onReady,
 }: {
   lang: "zh" | "en"; state: SimulationState; selectedId: string | null;
   onSelect: (asset: WorkshopAsset) => void; showLabels: boolean; showRoutes: boolean;
-  view: ViewMode; copy: Copy; onReady: () => void;
+  view: ViewMode; focusPosition?: [number, number]; copy: Copy; onReady: () => void;
 }) {
   const controls = useRef<any>(null);
   const zoneTitles: Record<string, string> = useMemo(() => Object.fromEntries(
@@ -201,8 +224,9 @@ export function WorkshopScene({
         const onClick = () => onSelect(asset);
         return <group key={asset.id} position={[asset.position[0], 0, asset.position[1]]}>
           <group rotation-y={Math.PI}>
-            {asset.kind === "lathe" ? <Lathe selected={selected} onSelect={onClick} faulted={faulted} /> :
-              <Mill selected={selected} onSelect={onClick} faulted={faulted} />}
+            {asset.kind === "lathe" ? <Lathe selected={selected} onSelect={onClick} faulted={faulted}
+              cutaway={view === "focus" && selected} /> :
+              <Mill selected={selected} onSelect={onClick} faulted={faulted} cutaway={view === "focus" && selected} />}
           </group>
           {showLabels && <TagFromParent asset={asset} zone={zoneTitles[asset.zone] ?? ""} selected={selected}
             status={machine?.status ?? "idle"} onSelect={onClick} copy={copy} />}
@@ -217,15 +241,12 @@ export function WorkshopScene({
       {ASSETS.filter(({ kind }) => kind === "amr").map((asset, index) => <AMR key={asset.id} asset={asset}
         position={amrPose(state.elapsed, index).position} heading={amrPose(state.elapsed, index).heading}
         selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />)}
+      {showRoutes && <Workpiece elapsed={state.elapsed} />}
       {ASSETS.filter(({ kind }) => !["lathe", "mill", "robot", "amr"].includes(kind)).map((asset) =>
         <StaticAsset key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />)}
-      {showLabels && ASSETS.filter(({ kind }) => kind === "buffer").map((asset) => <Html key={`buf-${asset.id}`}
-        position={[asset.position[0], 1.05, asset.position[1]]} center distanceFactor={32} occlude={false}>
-        <span className="buffer-number">{asset.id}</span>
-      </Html>)}
       <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.07} minPolarAngle={0.12}
         maxPolarAngle={Math.PI * 0.48} minDistance={16} maxDistance={75} target={[0, 0, 0]} />
-      <CameraRig view={view} controls={controls} />
+      <CameraRig view={view} controls={controls} focusPosition={focusPosition} />
     </Suspense>
   </Canvas>;
 }
@@ -235,14 +256,9 @@ function TagFromParent({ asset, zone, selected, status, onSelect, copy }: {
   onSelect: () => void; copy: Copy;
 }) {
   const colors: Record<string, string> = { running: "#57d5ad", setup: "#efb35a", idle: "#758894", fault: "#fa655b" };
-  return <Html position={[0, 3.56, 0]} center distanceFactor={37} occlude={false}>
-    <button className={`machine-label${selected ? " is-active" : ""}`} data-testid={`scene-pick-${asset.id}`}
-      onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelect(); }}>
-      <span className="machine-label-id"><i style={{ background: colors[status] ?? colors.idle }} />{asset.id}</span>
-      <span className="machine-label-status">{copy[status as keyof Copy] ?? status}</span>
-      <span className="machine-label-zone">{zone}</span>
-    </button>
-  </Html>;
+  return <WorldPlate name={`machine-label-${asset.id}`} position={[0, 0.18, 3.25]} rotation={[-Math.PI / 2, 0, 0]}
+    size={[1.8, 0.42]} title={`${asset.id} · ${copy[status as keyof Copy] ?? status}`}
+    detail={zone} accent={colors[status] ?? colors.idle} active={selected} onClick={onSelect} />;
 }
 
 function amrPose(elapsed: number, index: number) {

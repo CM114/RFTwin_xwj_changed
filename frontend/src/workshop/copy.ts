@@ -3,8 +3,8 @@ import type { Lang } from "./model";
 export const copy = {
   zh: {
     title: "精密加工车间", subtitle: "可视化生产仿真", demo: "仿真演示", live: "车间总览",
-    machined: "加工设备", logistics: "物流路线", labels: "设备标签", faults: "异常事件",
-    overview: "等轴视角", top: "俯视平面", fit: "车间总览", search: "查找设备或区域",
+    machined: "加工设备", logistics: "工件流程", labels: "设备标签", faults: "异常事件",
+    overview: "等轴视角", focus: "聚焦设备", top: "俯视平面", fit: "车间总览", search: "查找设备或区域",
     running: "运行中", setup: "准备中", idle: "待机", fault: "故障停机",
     selectAsset: "选择设备查看详情", production: "加工现场", shift: "模拟班次",
     elapsed: "模拟时间", scale: "倍速", pause: "暂停模拟", resume: "继续模拟",
@@ -18,8 +18,8 @@ export const copy = {
   },
   en: {
     title: "Precision Machine Shop", subtitle: "Interactive production simulation", demo: "SIMULATION",
-    live: "SHOP FLOOR", machined: "Equipment", logistics: "Material routes", labels: "Asset labels",
-    faults: "Fault events", overview: "Isometric", top: "Top view", fit: "Fit factory",
+    live: "SHOP FLOOR", machined: "Equipment", logistics: "Workpiece flow", labels: "Asset labels",
+    faults: "Fault events", overview: "Isometric", focus: "Focus asset", top: "Top view", fit: "Fit factory",
     search: "Search equipment or zone", running: "Running", setup: "Setup", idle: "Idle",
     fault: "Faulted", selectAsset: "Select equipment for details", production: "Machine shop",
     shift: "Simulated shift", elapsed: "Simulation time", scale: "Speed", pause: "Pause simulation",

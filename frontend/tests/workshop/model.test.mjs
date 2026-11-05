@@ -67,7 +67,7 @@ test('asset footprints stay inside the floor and stationary assets keep the cent
     assert.ok(Math.abs(x) + width / 2 <= FLOOR.width / 2, `${asset.id} x bound`);
     assert.ok(Math.abs(z) + depth / 2 <= FLOOR.depth / 2, `${asset.id} z bound`);
     if (asset.kind !== 'amr') assert.ok(Math.abs(z) - depth / 2 >= 2.5, `${asset.id} aisle`);
-    else assert.ok(width <= 1.5 && depth <= 1.0, `${asset.id} vehicle footprint`);
+    else assert.deepEqual([width, depth], [1.7, 1.2], `${asset.id} visible vehicle footprint`);
   }
   for (const machine of MACHINES) assert.deepEqual(machine.footprint, [4.5, 4.5]);
   const stationary = ASSETS.filter(({ kind }) => kind !== 'amr');
@@ -121,6 +121,33 @@ test('AMRs travel at 1.2 m/s, wrap continuously, and stay half a loop apart', as
   const nearEnd = amrPose(period - 0.0001, 0).position;
   assert.ok(Math.hypot(nearEnd[0] - AMR_PATH[0][0], nearEnd[1] - AMR_PATH[0][1]) < 0.001);
   assert.deepEqual(amrPose(Number.NaN, 0), amrPose(0, 0));
+});
+
+test('the workpiece flow connects raw stock, both CNC operations, finishing, inspection, and shipping', async () => {
+  const { ASSETS, PROCESS_STAGES, PROCESS_PATH } = await loadModel();
+  assert.deepEqual(PROCESS_STAGES.map(({ id }) => id), ['RAW', 'L01', 'M01', 'D01', 'W01', 'Q01', 'FG']);
+  for (const stage of PROCESS_STAGES) {
+    const asset = ASSETS.find(({ id }) => id === stage.id);
+    assert.deepEqual(stage.position, asset.position, `${stage.id} stage is anchored to its real station`);
+  }
+  assert.deepEqual(PROCESS_PATH[0], PROCESS_STAGES[0].position);
+  assert.deepEqual(PROCESS_PATH.at(-1), PROCESS_STAGES.at(-1).position);
+  for (const point of PROCESS_PATH) {
+    assert.ok(Math.abs(point[0]) <= 24 && Math.abs(point[1]) <= 15, `flow point ${point}`);
+  }
+});
+
+test('a workpiece advances through the entire route and loops back to raw stock', async () => {
+  const { PROCESS_PATH, PROCESS_SPEED, processPose } = await loadModel();
+  const routeLength = PROCESS_PATH.slice(1).reduce((sum, point, index) =>
+    sum + Math.hypot(point[0] - PROCESS_PATH[index][0], point[1] - PROCESS_PATH[index][1]), 0);
+  const period = routeLength / PROCESS_SPEED;
+  assert.deepEqual(processPose(0), { position: [...PROCESS_PATH[0]], heading: Math.atan2(0, 1) });
+  const halfway = processPose(period / 2);
+  assert.notDeepEqual(halfway.position, PROCESS_PATH[0]);
+  assert.deepEqual(processPose(period), processPose(0));
+  assert.deepEqual(processPose(-10), processPose(0));
+  assert.deepEqual(processPose(Number.NaN), processPose(0));
 });
 
 test('reset creates independent deterministic machine state with the approved initial statuses', async () => {

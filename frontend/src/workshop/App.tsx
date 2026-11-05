@@ -6,7 +6,7 @@ import type { Copy } from "./copy";
 import { WorkshopScene } from "./Scene";
 
 type Filter = "all" | "machines" | "flow";
-type View = "orbit" | "top";
+type View = "orbit" | "top" | "focus";
 
 function storedLanguage(): Lang {
   try {
@@ -19,7 +19,7 @@ function storedLanguage(): Lang {
 const machineIds = new Set(["L01", "L02", "L03", "M01", "M02", "M03"]);
 const robotMachine: Record<string, string> = { R01: "L01", R02: "M01" };
 const statusClass: Record<string, string> = { running: "running", setup: "setup", idle: "idle", fault: "fault" };
-const viewPreset: Record<View, "orbit" | "top"> = { orbit: "orbit", top: "top" };
+const viewPreset: Record<View, View> = { orbit: "orbit", top: "top", focus: "focus" };
 
 function machineFor(asset: WorkshopAsset | null, state: SimulationState) {
   if (!asset) return null;
@@ -47,7 +47,7 @@ export default function WorkshopApp() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [showLabels, setShowLabels] = useState(true);
-  const [showRoutes, setShowRoutes] = useState(false);
+  const [showRoutes, setShowRoutes] = useState(true);
   const [view, setView] = useState<View>("orbit");
   const [sceneReady, setSceneReady] = useState(false);
 
@@ -84,6 +84,9 @@ export default function WorkshopApp() {
     });
   }, [filter, query]);
   const faultCount = Object.values(simulation.machines).filter(({ status }) => status === "fault").length;
+  const flowStages = lang === "zh"
+    ? ["原料", "数控车削", "加工中心", "去毛刺", "清洗", "尺寸检验", "成品"]
+    : ["Raw stock", "Turning", "Milling", "Deburr", "Wash", "Inspect", "Finished"];
 
   const selectAsset = (asset: WorkshopAsset) => setSelectedId(asset.id);
   const reset = () => { setSimulation(createSimulation()); setSelectedId("L01"); };
@@ -161,14 +164,16 @@ export default function WorkshopApp() {
             <span className="scene-tool-divider" />
             <button className={view === "orbit" ? "pressed" : ""} aria-pressed={view === "orbit"}
               onClick={() => setView("orbit")}>{T.overview}</button>
+            <button className={view === "focus" ? "pressed" : ""} aria-pressed={view === "focus"}
+              onClick={() => setView("focus")}>{T.focus}</button>
             <button className={view === "top" ? "pressed" : ""} aria-pressed={view === "top"}
               onClick={() => setView("top")}>{T.top}</button>
           </div>
         </div>
 
-        <div className="scene-canvas" data-testid="workshop-stage" data-ready={sceneReady}>
+        <div className="scene-canvas" data-testid="workshop-stage" data-ready={sceneReady} data-label-mode="world" data-view-mode={view}>
           <WorkshopScene lang={lang} state={simulation} selectedId={selectedId} onSelect={selectAsset}
-            showLabels={showLabels} showRoutes={showRoutes} view={viewPreset[view]} copy={T}
+            showLabels={showLabels} showRoutes={showRoutes} view={viewPreset[view]} focusPosition={selected?.position} copy={T}
             onReady={() => setSceneReady(true)} />
           {!sceneReady && <div className="scene-loading"><span className="loading-line" />3D</div>}
           <div className="scene-orientation" aria-hidden="true">
@@ -179,10 +184,10 @@ export default function WorkshopApp() {
         </div>
 
         <div className="scene-footer">
-          <div className="route-legend">
+          <div className="process-flow" data-testid="process-flow" aria-label={T.materialFlow}>
             <span className="legend-label">{T.materialFlow}</span>
-            <span><i className="route-a" />{lang === "zh" ? "轴类零件" : "Shaft part"}</span>
-            <span><i className="route-b" />{lang === "zh" ? "法兰零件" : "Flange part"}</span>
+            <div>{flowStages.map((stage, index) => <span key={stage} className="process-step">
+              <i>{String(index + 1).padStart(2, "0")}</i>{stage}</span>)}</div>
           </div>
           <div className="scene-attribution">{T.secondary}</div>
         </div>

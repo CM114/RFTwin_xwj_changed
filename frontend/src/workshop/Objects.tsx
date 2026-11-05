@@ -1,5 +1,4 @@
-import { Html } from "@react-three/drei";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
@@ -9,50 +8,116 @@ const statusColor = {
   running: "#52d6ad", setup: "#efb35a", idle: "#768995", fault: "#fa655b",
 } as const;
 
-function Tag({ asset, active, onSelect }: {
-  asset: WorkshopAsset; active: boolean; onSelect: (asset: WorkshopAsset) => void;
+export function WorldPlate({ position, rotation = [0, 0, 0], size, title, detail = "", accent, active = false,
+  onClick, name }: {
+  position: [number, number, number]; rotation?: [number, number, number]; size: [number, number];
+  title: string; detail?: string; accent: string; active?: boolean; onClick?: () => void; name?: string;
 }) {
-  const color = statusColor[asset.kind === "lathe" || asset.kind === "mill" ? "running" : "idle"];
-  return (
-    <Html position={[0, 0.65, 0]} center distanceFactor={40} occlude={false}>
-      <button className={`scene-tag${active ? " is-active" : ""}`} data-testid={`scene-pick-${asset.id}`}
-        onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelect(asset); }}>
-        <span className="tag-light" style={{ background: color }} />{asset.id}
-      </button>
-    </Html>
-  );
+  const texture = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = detail ? 144 : 96;
+    const context = canvas.getContext("2d");
+    if (!context) return new THREE.CanvasTexture(canvas);
+    context.fillStyle = active ? "#173a34" : "#172226";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = accent;
+    context.fillRect(0, 0, 8, canvas.height);
+    context.fillStyle = "#e3ece6";
+    context.textBaseline = "middle";
+    let titleSize = 56;
+    context.font = `600 ${titleSize}px Arial, 'Microsoft YaHei', sans-serif`;
+    while (titleSize > 30 && context.measureText(title).width > 465) {
+      titleSize -= 2;
+      context.font = `600 ${titleSize}px Arial, 'Microsoft YaHei', sans-serif`;
+    }
+    context.fillText(title, 25, detail ? 49 : 48, 465);
+    if (detail) {
+      context.fillStyle = "#91a39a";
+      context.font = "32px Arial, 'Microsoft YaHei', sans-serif";
+      context.fillText(detail, 25, 105, 465);
+    }
+    context.strokeStyle = active ? accent : "#52625e";
+    context.lineWidth = 3;
+    context.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
+    const next = new THREE.CanvasTexture(canvas);
+    next.colorSpace = THREE.SRGBColorSpace;
+    return next;
+  }, [active, accent, detail, title]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return <mesh name={name} position={position} rotation={rotation} onClick={onClick ? (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation(); onClick();
+  } : undefined}>
+    <planeGeometry args={size} />
+    <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
+  </mesh>;
 }
 
-export function Lathe({ selected, onSelect, faulted = false }: {
-  selected: boolean; onSelect: () => void; faulted?: boolean;
+function Tag({ asset, active, onSelect, position }: {
+  asset: WorkshopAsset; active: boolean; onSelect: (asset: WorkshopAsset) => void;
+  position?: [number, number, number];
 }) {
+  const color = statusColor[asset.kind === "lathe" || asset.kind === "mill" ? "running" : "idle"];
+  const z = position?.[2] ?? asset.footprint[1] / 2 + 0.16;
+  return <WorldPlate name={`asset-label-${asset.id}`} position={position ?? [0, 0.16, z]}
+    rotation={[-Math.PI / 2, 0, 0]} size={[1.7, 0.42]} title={asset.id} detail={asset.name.zh}
+    accent={color} active={active} onClick={() => onSelect(asset)} />;
+}
+
+export function Lathe({ selected, onSelect, faulted = false, cutaway = false }: {
+  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean;
+}) {
+  const spindle = useRef<THREE.Group>(null);
+  const tool = useRef<THREE.Group>(null);
+  const progress = useRef(0);
   const status = faulted ? statusColor.fault : statusColor.running;
+  useFrame((_, delta) => {
+    if (faulted) return;
+    progress.current += delta;
+    if (spindle.current) spindle.current.rotation.z += delta * 4.2;
+    if (tool.current) tool.current.position.x = -1.08 + Math.sin(progress.current * 0.65) * 0.24;
+  });
   return (
     <group onClick={(event: ThreeEvent<MouseEvent>) => { event.stopPropagation(); onSelect(); }}>
-      <mesh castShadow position={[0, 1.52, 0]}>
-        <boxGeometry args={[4.15, 2.8, 3.45]} />
-        <meshStandardMaterial color={faulted ? "#69403b" : "#405761"} metalness={0.45} roughness={0.4} />
-      </mesh>
+      <mesh castShadow position={[0, 0.25, 0]}><boxGeometry args={[4.15, 0.5, 3.45]} />
+        <meshStandardMaterial color="#34464f" metalness={0.54} roughness={0.4} /></mesh>
+      {[-1.88, 1.88].map((x) => <mesh key={x} castShadow position={[x, 1.58, 0]}>
+        <boxGeometry args={[0.42, 2.6, 3.42]} />
+        <meshStandardMaterial color={faulted ? "#69403b" : "#405761"} metalness={0.48} roughness={0.39} /></mesh>)}
+      <mesh castShadow position={[0, 1.58, 1.54]}><boxGeometry args={[3.62, 2.6, 0.34]} />
+        <meshStandardMaterial color="#354851" metalness={0.45} roughness={0.42} /></mesh>
+      {!cutaway && <mesh castShadow position={[0, 2.91, 0]}><boxGeometry args={[4.16, 0.44, 3.45]} />
+        <meshStandardMaterial color="#405761" metalness={0.48} roughness={0.36} /></mesh>}
+      {[-1.38, 1.38].map((x) => <mesh key={`door-${x}`} position={[x, 1.58, -1.71]}>
+        <boxGeometry args={[0.12, 2.18, 0.12]} /><meshStandardMaterial color="#a7b4b3" metalness={0.78} roughness={0.3} /></mesh>)}
       <mesh castShadow position={[-0.08, 3.02, 0]}>
         <boxGeometry args={[4.25, 0.18, 3.55]} />
         <meshStandardMaterial color="#80939a" metalness={0.55} roughness={0.35} />
       </mesh>
       <mesh position={[0.28, 1.58, -1.74]}>
         <boxGeometry args={[2.75, 1.75, 0.055]} />
-        <meshStandardMaterial color="#16333c" emissive="#0d252e" emissiveIntensity={0.7} metalness={0.1} roughness={0.18} />
+        <meshStandardMaterial color="#17333b" transparent opacity={0.16} metalness={0.1} roughness={0.18} />
       </mesh>
       <mesh castShadow position={[0.27, 1.58, -1.78]}>
         <boxGeometry args={[2.56, 1.55, 0.04]} />
-        <meshStandardMaterial color="#4f777c" transparent opacity={0.45} metalness={0.35} roughness={0.17} />
+        <meshStandardMaterial color="#6b9b9b" transparent opacity={0.12} metalness={0.28} roughness={0.17} />
       </mesh>
-      <mesh castShadow position={[-1.72, 1.48, -1.94]} rotation-x={Math.PI / 2}>
-        <cylinderGeometry args={[0.7, 0.7, 0.32, 32]} />
-        <meshStandardMaterial color="#a5b0b3" metalness={0.85} roughness={0.25} />
-      </mesh>
-      <mesh castShadow position={[-1.72, 1.48, -2.11]} rotation-x={Math.PI / 2}>
-        <cylinderGeometry args={[0.4, 0.4, 0.11, 24]} />
-        <meshStandardMaterial color="#44535a" metalness={0.8} roughness={0.28} />
-      </mesh>
+      <group ref={spindle} position={[-1.72, 1.48, -1.94]}>
+        <mesh castShadow rotation-x={Math.PI / 2}><cylinderGeometry args={[0.7, 0.7, 0.32, 32]} />
+          <meshStandardMaterial color="#a5b0b3" metalness={0.85} roughness={0.25} /></mesh>
+        <mesh castShadow position={[0, 0, -0.18]} rotation-x={Math.PI / 2}>
+          <cylinderGeometry args={[0.4, 0.4, 0.11, 24]} /><meshStandardMaterial color="#44535a" metalness={0.8} roughness={0.28} /></mesh>
+        <mesh castShadow position={[0, 0, 0.47]} rotation-x={Math.PI / 2}>
+          <cylinderGeometry args={[0.16, 0.16, 0.88, 20]} /><meshStandardMaterial color="#c6d1cf" metalness={0.9} roughness={0.2} /></mesh>
+      </group>
+      <group ref={tool} position={[-1.08, 1.62, -1.25]}>
+        <mesh castShadow position={[0, -0.25, 0]}><boxGeometry args={[0.68, 0.34, 0.72]} />
+          <meshStandardMaterial color="#52646a" metalness={0.75} roughness={0.3} /></mesh>
+        <mesh castShadow position={[0, 0.03, -0.13]} rotation-z={-0.35}>
+          <boxGeometry args={[0.16, 0.42, 0.2]} /><meshStandardMaterial color="#d0ad69" metalness={0.85} roughness={0.22} /></mesh>
+        <mesh position={[0, 0.03, -0.25]}><sphereGeometry args={[0.06, 12, 10]} />
+          <meshStandardMaterial color="#7ee5c5" emissive="#64dfb8" emissiveIntensity={1.3} /></mesh>
+      </group>
       <mesh position={[0.9, 1.7, -1.98]}>
         <boxGeometry args={[0.58, 1.18, 0.18]} />
         <meshStandardMaterial color="#26373e" metalness={0.15} roughness={0.65} />
@@ -64,36 +129,63 @@ export function Lathe({ selected, onSelect, faulted = false }: {
   );
 }
 
-export function Mill({ selected, onSelect, faulted = false }: {
-  selected: boolean; onSelect: () => void; faulted?: boolean;
+export function Mill({ selected, onSelect, faulted = false, cutaway = false }: {
+  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean;
 }) {
+  const spindleHead = useRef<THREE.Group>(null);
+  const table = useRef<THREE.Group>(null);
+  const progress = useRef(0);
   const status = faulted ? statusColor.fault : statusColor.running;
+  useFrame((_, delta) => {
+    if (faulted) return;
+    progress.current += delta;
+    if (spindleHead.current) {
+      spindleHead.current.position.y = 2.2 + Math.sin(progress.current * 0.7) * 0.23;
+      spindleHead.current.rotation.y += delta * 4.8;
+    }
+    if (table.current) table.current.position.x = Math.sin(progress.current * 0.45) * 0.3;
+  });
   return (
     <group onClick={(event: ThreeEvent<MouseEvent>) => { event.stopPropagation(); onSelect(); }}>
-      <mesh castShadow position={[0, 1.55, 0]}>
-        <boxGeometry args={[4.12, 2.9, 3.55]} />
-        <meshStandardMaterial color={faulted ? "#69403b" : "#3c505b"} metalness={0.47} roughness={0.4} />
-      </mesh>
-      <mesh castShadow position={[0, 3.11, 0]}>
-        <boxGeometry args={[4.22, 0.16, 3.65]} />
-        <meshStandardMaterial color="#798d98" metalness={0.58} roughness={0.32} />
-      </mesh>
+      <mesh castShadow position={[0, 0.26, 0]}><boxGeometry args={[4.12, 0.52, 3.55]} />
+        <meshStandardMaterial color="#394b54" metalness={0.52} roughness={0.4} /></mesh>
+      {[-1.84, 1.84].map((x) => <mesh key={x} castShadow position={[x, 1.65, 0]}>
+        <boxGeometry args={[0.42, 2.38, 3.5]} />
+        <meshStandardMaterial color={faulted ? "#69403b" : "#3c505b"} metalness={0.47} roughness={0.4} /></mesh>)}
+      <mesh castShadow position={[0, 1.62, 1.57]}><boxGeometry args={[3.62, 2.35, 0.38]} />
+        <meshStandardMaterial color="#344950" metalness={0.4} roughness={0.45} /></mesh>
+      {!cutaway && <mesh castShadow position={[0, 2.94, 0]}><boxGeometry args={[4.15, 0.43, 3.55]} />
+        <meshStandardMaterial color="#798d98" metalness={0.58} roughness={0.32} /></mesh>}
+      {[-1.48, 1.48].map((x) => <mesh key={`door-${x}`} position={[x, 1.83, -1.76]}>
+        <boxGeometry args={[0.15, 1.9, 0.1]} /><meshStandardMaterial color="#aebcbd" metalness={0.8} roughness={0.28} /></mesh>)}
+      <mesh position={[0, 2.78, -1.76]}><boxGeometry args={[3.06, 0.15, 0.1]} />
+        <meshStandardMaterial color="#aebcbd" metalness={0.8} roughness={0.28} /></mesh>
+      <mesh position={[0, 1.68, 1.35]}><boxGeometry args={[3.15, 1.88, 0.05]} />
+        <meshStandardMaterial color="#142328" metalness={0.1} roughness={0.7} /></mesh>
       <mesh position={[0.32, 1.8, -1.79]}>
         <boxGeometry args={[2.55, 1.84, 0.06]} />
-        <meshStandardMaterial color="#1b343e" emissive="#15333c" emissiveIntensity={0.4} metalness={0.35} roughness={0.18} />
+        <meshStandardMaterial color="#1b343e" transparent opacity={0.12} metalness={0.35} roughness={0.18} />
       </mesh>
       <mesh castShadow position={[0.32, 1.78, -1.83]}>
         <boxGeometry args={[2.34, 1.62, 0.04]} />
-        <meshStandardMaterial color="#658387" transparent opacity={0.42} metalness={0.35} roughness={0.2} />
+        <meshStandardMaterial color="#9bc4bd" transparent opacity={0.1} metalness={0.2} roughness={0.2} />
       </mesh>
-      <mesh castShadow position={[-1.48, 2.63, -1.92]}>
-        <boxGeometry args={[0.18, 0.62, 0.24]} />
-        <meshStandardMaterial color="#bdc7c6" metalness={0.78} roughness={0.24} />
-      </mesh>
-      <mesh castShadow position={[-1.48, 1.54, -1.92]}>
-        <boxGeometry args={[0.8, 0.12, 0.16]} />
-        <meshStandardMaterial color="#aab8b7" metalness={0.82} roughness={0.28} />
-      </mesh>
+      <group ref={spindleHead} position={[0, 2.2, 0.15]}>
+        <mesh castShadow position={[0, 0.22, 0]}><boxGeometry args={[0.72, 0.5, 0.82]} />
+          <meshStandardMaterial color="#bbc7c4" metalness={0.74} roughness={0.27} /></mesh>
+        <mesh castShadow position={[0, -0.23, 0]} rotation-x={Math.PI / 2}>
+          <cylinderGeometry args={[0.18, 0.18, 0.58, 20]} /><meshStandardMaterial color="#e0b762" metalness={0.84} roughness={0.22} /></mesh>
+        <mesh castShadow position={[0, -0.54, 0]} rotation-x={Math.PI / 2}>
+          <cylinderGeometry args={[0.1, 0.1, 0.18, 16]} /><meshStandardMaterial color="#d5e1dd" metalness={0.8} roughness={0.22} /></mesh>
+      </group>
+      <group ref={table} position={[0, 0.92, -0.12]}>
+        <mesh castShadow><boxGeometry args={[1.68, 0.28, 1.24]} />
+          <meshStandardMaterial color="#79888a" metalness={0.72} roughness={0.28} /></mesh>
+        <mesh castShadow position={[0, 0.28, 0]}><boxGeometry args={[0.72, 0.45, 0.58]} />
+          <meshStandardMaterial color="#bd8a49" metalness={0.5} roughness={0.3} /></mesh>
+        <mesh castShadow position={[0, 0.53, 0]} rotation-x={Math.PI / 2}>
+          <cylinderGeometry args={[0.22, 0.22, 0.42, 18]} /><meshStandardMaterial color="#d1dcda" metalness={0.88} roughness={0.2} /></mesh>
+      </group>
       <ControlPanel faulted={faulted} position={[-1.47, 1.04, -2.02]} />
       <SignalTower position={[1.58, 3.34, -1.17]} status={status} />
       {selected && <SelectionHalo color="#70e5ce" />}
@@ -173,21 +265,31 @@ export function Robot({ asset, machine, rotation, selected, onSelect }: {
 export function AMR({ asset, position, heading, selected, onSelect }: {
   asset: WorkshopAsset; position: [number, number]; heading: number; selected: boolean; onSelect: () => void;
 }) {
+  const lidar = useRef<THREE.Group>(null);
+  useFrame((_, delta) => { if (lidar.current) lidar.current.rotation.y += delta * 1.2; });
   return <group position={[position[0], 0, position[1]]} rotation-y={-heading}
     onClick={(event: ThreeEvent<MouseEvent>) => { event.stopPropagation(); onSelect(); }}>
-    <mesh castShadow position={[0, 0.23, 0]}><boxGeometry args={[1.25, 0.35, 0.84]} />
-      <meshStandardMaterial color="#38c3b3" metalness={0.46} roughness={0.34} /></mesh>
-    <mesh castShadow position={[-0.18, 0.44, -0.08]}><boxGeometry args={[0.47, 0.17, 0.56]} />
-      <meshStandardMaterial color="#17272b" metalness={0.38} roughness={0.26} /></mesh>
-    <mesh position={[0.42, 0.49, -0.03]}><boxGeometry args={[0.16, 0.12, 0.14]} />
-      <meshStandardMaterial color="#d5f6dc" emissive="#63f0a9" emissiveIntensity={1.25} /></mesh>
-    <mesh position={[0.62, 0.59, 0]}><cylinderGeometry args={[0.12, 0.12, 0.09, 16]} />
-      <meshStandardMaterial color="#b6c6be" metalness={0.84} roughness={0.22} /></mesh>
-    {[[-0.42, -0.31], [-0.42, 0.31], [0.42, -0.31], [0.42, 0.31]].map(([x, z]) =>
+    <mesh castShadow position={[0, 0.27, 0]}><boxGeometry args={[1.62, 0.43, 1.04]} />
+      <meshStandardMaterial color="#21b9a5" metalness={0.42} roughness={0.31} /></mesh>
+    <mesh castShadow position={[0, 0.51, 0]}><boxGeometry args={[1.22, 0.13, 0.78]} />
+      <meshStandardMaterial color="#9aab9f" metalness={0.3} roughness={0.48} /></mesh>
+    <mesh castShadow position={[0.02, 0.72, 0.02]}><boxGeometry args={[0.7, 0.3, 0.56]} />
+      <meshStandardMaterial color="#c58e4e" metalness={0.24} roughness={0.46} /></mesh>
+    <group ref={lidar} position={[-0.5, 0.66, 0]}>
+      <mesh><cylinderGeometry args={[0.08, 0.1, 0.26, 16]} />
+        <meshStandardMaterial color="#d6e4da" metalness={0.75} roughness={0.23} /></mesh>
+      <mesh position={[0, 0.15, 0]}><torusGeometry args={[0.13, 0.035, 8, 20]} />
+        <meshStandardMaterial color="#e2bd64" emissive="#d19e42" emissiveIntensity={0.65} /></mesh>
+    </group>
+    <mesh position={[0.55, 0.54, -0.1]}><boxGeometry args={[0.19, 0.14, 0.18]} />
+      <meshStandardMaterial color="#e8f7dc" emissive="#8df3b3" emissiveIntensity={1.6} /></mesh>
+    <mesh position={[0.61, 0.54, 0.15]}><boxGeometry args={[0.12, 0.12, 0.18]} />
+      <meshStandardMaterial color="#f0b756" emissive="#d28e35" emissiveIntensity={1.1} /></mesh>
+    {[[-0.48, -0.43], [-0.48, 0.43], [0.48, -0.43], [0.48, 0.43]].map(([x, z]) =>
       <mesh key={`${x}:${z}`} position={[x, 0.13, z]} rotation-z={Math.PI / 2}>
         <cylinderGeometry args={[0.09, 0.09, 0.08, 14]} /><meshStandardMaterial color="#11191c" /></mesh>)}
     {selected && <SelectionHalo color="#70e5ce" />}
-    <Tag asset={asset} active={selected} onSelect={onSelect} />
+    <Tag asset={asset} active={selected} onSelect={onSelect} position={[0, 0.16, 0.76]} />
   </group>;
 }
 
@@ -296,18 +398,17 @@ function MeasureGauge() {
   </group>;
 }
 
-export function ZoneSign({ position, label, color }: {
-  position: [number, number]; label: string; color: string;
+export function ZoneSign({ position, rotationY = 0, label, color }: {
+  position: [number, number]; rotationY?: number; label: string; color: string;
 }) {
-  return <group position={[position[0], 0, position[1]]}>
-    <mesh position={[0, 1.15, 0]}><boxGeometry args={[3.6, 0.56, 0.11]} />
+  return <group position={[position[0], 0, position[1]]} rotation-y={rotationY}>
+    <mesh position={[0, 0.88, 0]}><boxGeometry args={[2.8, 0.46, 0.11]} />
       <meshStandardMaterial color="#18252a" metalness={0.28} roughness={0.45} /></mesh>
-    <mesh position={[-1.64, 1.15, 0.07]}><boxGeometry args={[0.045, 0.29, 0.012]} />
+    <mesh position={[-1.27, 0.88, 0.07]}><boxGeometry args={[0.045, 0.25, 0.012]} />
       <meshBasicMaterial color={color} /></mesh>
-    <Html position={[0, 1.16, 0.08]} center distanceFactor={30} occlude={false}>
-      <div className="zone-sign">{label}</div>
-    </Html>
-    {[-1.6, 1.6].map((x) => <mesh key={x} position={[x, 0.53, 0]}>
-      <boxGeometry args={[0.09, 1.05, 0.09]} /><meshStandardMaterial color="#47585d" metalness={0.5} /></mesh>)}
+    <WorldPlate name={`zone-label-${label}`} position={[0, 0.89, 0.08]} size={[2.8, 0.46]}
+      title={label} accent={color} />
+    {[-1.25, 1.25].map((x) => <mesh key={x} position={[x, 0.41, 0]}>
+      <boxGeometry args={[0.08, 0.78, 0.08]} /><meshStandardMaterial color="#47585d" metalness={0.5} /></mesh>)}
   </group>;
 }

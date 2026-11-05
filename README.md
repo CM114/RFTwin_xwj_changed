@@ -12,6 +12,8 @@ the scope of the added work, see [维修工单操作说明](docs/MAINTENANCE_ZH.
 This fork retains the upstream [MIT license](LICENSE) and attribution to
 [WayneChou-bot/RFTwin](https://github.com/WayneChou-bot/RFTwin).
 
+The standalone **精密加工车间 3D Demo** is available at `/workshop.html` when the frontend dev server is running. It demonstrates a complete illustrative machining route with world-anchored labels, visible machine internals and AMR circulation. See [车间 Demo 操作说明](docs/WORKSHOP_ZH.md); all scene motion and status are local demo behavior.
+
 **A browser-native digital twin of a robotic production line — backend-authoritative, deterministic, explainable.**
 Four process cells, 12 robot arms and an AMR fleet run in a Python simulation engine; the 3D factory in the browser only
 renders. Same seed, same result — so every KPI, dispatch and detour can be traced to its cause.

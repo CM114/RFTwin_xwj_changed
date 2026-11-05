@@ -15,10 +15,34 @@ test("workshop opens with a rendered factory and six selectable machine tools", 
   for (const id of ["L01", "L02", "L03", "M01", "M02", "M03"]) {
     await expect(page.getByTestId("asset-item-" + id)).toBeVisible();
   }
-  await page.getByTestId("scene-pick-L01").click();
+  await page.getByTestId("asset-item-L01").click();
   await expect(page.getByTestId("selected-id")).toHaveText("L01");
   await page.screenshot({ path: "test-results/workshop-desktop.png", fullPage: true });
   expect(errors).toEqual([]);
+});
+
+test("world labels stay anchored and the complete workpiece route is visible", async ({ page }) => {
+  await openWorkshop(page);
+  await expect(page.getByTestId("workshop-stage")).toHaveAttribute("data-label-mode", "world");
+  await expect(page.locator(".machine-label, .scene-tag, .zone-sign")).toHaveCount(0);
+  await expect(page.getByTestId("process-flow")).toContainText("原料");
+  await expect(page.getByTestId("process-flow")).toContainText("车削");
+  await expect(page.getByTestId("process-flow")).toContainText("加工中心");
+  await expect(page.getByTestId("process-flow")).toContainText("去毛刺");
+  await expect(page.getByTestId("process-flow")).toContainText("清洗");
+  await expect(page.getByTestId("process-flow")).toContainText("尺寸检验");
+  await expect(page.getByTestId("process-flow")).toContainText("成品");
+});
+
+test("selected machinery can be inspected in a focused close-up", async ({ page }) => {
+  await openWorkshop(page);
+  await page.getByTestId("asset-item-M01").click();
+  const focus = page.getByRole("button", { name: "聚焦设备", exact: true });
+  await focus.click();
+  await expect(focus).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("workshop-stage")).toHaveAttribute("data-view-mode", "focus");
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: "test-results/workshop-machine-focus.png", fullPage: true });
 });
 
 test("machine fault and restoration update the shared scene state", async ({ page }) => {
@@ -49,8 +73,12 @@ test("camera, layers and English controls work without a backend", async ({ page
   await openWorkshop(page);
   await page.getByRole("button", { name: "俯视平面" }).click();
   await expect(page.getByRole("button", { name: "俯视平面" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "物流路线", exact: true }).click();
-  await expect(page.getByRole("button", { name: "物流路线", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const flowToggle = page.getByRole("button", { name: "工件流程", exact: true });
+  await expect(flowToggle).toHaveAttribute("aria-pressed", "true");
+  await flowToggle.click();
+  await expect(flowToggle).toHaveAttribute("aria-pressed", "false");
+  await flowToggle.click();
+  await expect(flowToggle).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "设备标签", exact: true }).click();
   await expect(page.getByTestId("scene-pick-L01")).toHaveCount(0);
   await page.getByRole("button", { name: "Switch to English" }).click();

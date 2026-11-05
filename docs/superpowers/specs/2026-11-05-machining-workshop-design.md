@@ -11,6 +11,14 @@ The user approved the proposed floor plan and requested implementation and publi
 - Simplified Chinese default and complete English interface toggle. Prominent local simulation label. No connection to real equipment; no claim of scheduling optimization, collision certification or real production prediction.
 - Dark industrial interface, mint/blue route accents, warm robot color, readable labels, useful desktop and narrow-window layouts. No external model/font service.
 
+## Demo interaction details
+
+- Scene labels are textured plates attached to fixed world coordinates, so orbiting the camera never makes a label follow the viewer. Zone signs are oriented toward their aisle; asset labels sit at the associated machine or station.
+- AMRs have a clearly readable chassis, cargo deck, lidar and direction indicator, and circulate on the central aisle loop.
+- Lathe and machining-center enclosures expose their spindle, tool and worktable through front windows. Selecting a machine and choosing Focus opens a closer view and removes that machine's top panel to reveal the working area.
+- The complete illustrative part route is shown by default, from raw stock through turning, milling, deburring, washing and dimensional inspection to finished goods. A moving workpiece marker travels the route; the footer repeats all seven stages.
+- All machine motion and workpiece travel are visual demonstration behavior. They do not model machining parameters, part geometry changes, cycle times, quality outcomes or real equipment telemetry.
+
 ## Implementation boundaries
 
 Keep pure layout and animation-state functions in frontend/src/workshop/model.ts. React controls live in App.tsx, 3D geometry in Scene.tsx and Objects.tsx, and bilingual copy in copy.ts. Vite builds both the existing index.html and the new workshop.html. Existing Python APIs and existing UI behavior remain intact.

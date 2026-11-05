@@ -82,8 +82,8 @@ export const MACHINES: MachineAsset[] = [
 const nonMachineAssets: WorkshopAsset[] = [
   asset('R01', '上下料机器人 01', 'Tending Robot 01', 'robot', [-12, -3.8], [1.6, 1.6], 'turning'),
   asset('R02', '上下料机器人 02', 'Tending Robot 02', 'robot', [-12, 3.8], [1.6, 1.6], 'milling'),
-  asset('AMR01', '搬运车 01', 'AMR 01', 'amr', [-21, -1.2], [1.5, 1], 'logistics'),
-  asset('AMR02', '搬运车 02', 'AMR 02', 'amr', [21, 1.2], [1.5, 1], 'logistics'),
+  asset('AMR01', '搬运车 01', 'AMR 01', 'amr', [-21, -1.2], [1.7, 1.2], 'logistics'),
+  asset('AMR02', '搬运车 02', 'AMR 02', 'amr', [21, 1.2], [1.7, 1.2], 'logistics'),
   asset('RAW', '原料区', 'Raw stock', 'raw', [-20, -8], [5, 7], 'raw'),
   asset('FG', '成品区', 'Finished goods', 'finished', [20, -8], [5, 5], 'finished'),
   asset('D01', '去毛刺工位', 'Deburring', 'deburr', [14, 8], [3, 3], 'post'),
@@ -111,6 +111,24 @@ export const AMR_PATH: Vec2[] = [
   [-21, -1.2],
 ];
 
+export const PROCESS_STAGES = [
+  { id: 'RAW', position: [-20, -8] as Vec2 },
+  { id: 'L01', position: [-12, -8] as Vec2 },
+  { id: 'M01', position: [-12, 8] as Vec2 },
+  { id: 'D01', position: [14, 8] as Vec2 },
+  { id: 'W01', position: [20, 8] as Vec2 },
+  { id: 'Q01', position: [13, -8] as Vec2 },
+  { id: 'FG', position: [20, -8] as Vec2 },
+] as const;
+
+export const PROCESS_PATH: Vec2[] = [
+  [-20, -8], [-12, -8], [-15, -8], [-15, 8], [-12, 8],
+  [-12, 13], [14, 13], [14, 8], [20, 8], [22, 8],
+  [22, 0], [13, 0], [13, -8], [20, -8],
+];
+
+export const PROCESS_SPEED = 0.62;
+
 const MACHINE_IDS = MACHINES.map(({ id }) => id);
 const machineIdSet = new Set(MACHINE_IDS);
 const SETUP_SECONDS = 18;
@@ -127,6 +145,13 @@ const AMR_ROUTE_LENGTH = AMR_PATH.slice(1).reduce(
   (total, point, pointIndex) => total + Math.hypot(
     point[0] - AMR_PATH[pointIndex][0],
     point[1] - AMR_PATH[pointIndex][1],
+  ),
+  0,
+);
+const PROCESS_ROUTE_LENGTH = PROCESS_PATH.slice(1).reduce(
+  (total, point, pointIndex) => total + Math.hypot(
+    point[0] - PROCESS_PATH[pointIndex][0],
+    point[1] - PROCESS_PATH[pointIndex][1],
   ),
   0,
 );
@@ -280,4 +305,28 @@ export function amrPose(elapsed: number, index: number): { position: Vec2; headi
   }
 
   return { position: [...AMR_PATH[0]], heading: 0 };
+}
+
+export function processPose(elapsed: number): { position: Vec2; heading: number } {
+  const safeElapsed = Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0;
+  const traveled = (safeElapsed * PROCESS_SPEED) % PROCESS_ROUTE_LENGTH;
+  let distance = traveled < 1e-8 ? 0 : traveled;
+
+  for (let segment = 1; segment < PROCESS_PATH.length; segment++) {
+    const from = PROCESS_PATH[segment - 1];
+    const to = PROCESS_PATH[segment];
+    const dx = to[0] - from[0];
+    const dz = to[1] - from[1];
+    const length = Math.hypot(dx, dz);
+    if (distance <= length || segment === PROCESS_PATH.length - 1) {
+      const along = Math.min(length, Math.max(0, distance));
+      return {
+        position: [from[0] + dx * along / length, from[1] + dz * along / length],
+        heading: Math.atan2(dz, dx),
+      };
+    }
+    distance -= length;
+  }
+
+  return { position: [...PROCESS_PATH[0]], heading: 0 };
 }
