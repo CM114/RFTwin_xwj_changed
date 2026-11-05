@@ -1,4 +1,5 @@
 import { createLogger, defineConfig } from "vite";
+import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 
 /* Backend 未啟動時 /api 轉發會 ECONNREFUSED：這是 §43 的正常路徑（前端落到
@@ -25,5 +26,11 @@ export default defineConfig({
   customLogger: logger,
   server: { proxy },
   preview: { proxy },
-  build: { chunkSizeWarningLimit: 1500 },
+  build: {
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: { input: {
+      main: resolve(import.meta.dirname, "index.html"),
+      workshop: resolve(import.meta.dirname, "workshop.html"),
+    } },
+  },
 });
