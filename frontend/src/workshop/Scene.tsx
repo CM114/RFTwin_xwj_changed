@@ -1,10 +1,10 @@
 import { Line, OrbitControls } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Suspense, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Copy } from "./copy";
-import { AMR, Lathe, Mill, Robot, StaticAsset, WorldPlate, ZoneSign } from "./Objects";
-import { AMR_PATH, ASSETS, PROCESS_PATH, PROCESS_STAGES, processPose } from "./model";
+import { AMR, Lathe, Mill, Robot, RobotRail, StaticAsset, WorldPlate, ZoneSign } from "./Objects";
+import { amrPose, assetPose, ASSETS, PROCESS_PATH, PROCESS_STAGES, ROBOT_CELLS, processPose, robotPose, WORKPIECE_ASSET } from "./model";
 import type { SimulationState, WorkshopAsset } from "./model";
 
 type ViewMode = "orbit" | "top" | "focus";
@@ -19,8 +19,8 @@ const zoneLabels = {
   support: { zh: "工装 · 维修支持", en: "TOOLING · MAINTENANCE", color: "#9aabb2" },
 } as const;
 
-function WorkshopFloor({ lang, labels, routes }: {
-  lang: "zh" | "en"; labels: boolean; routes: boolean;
+function WorkshopFloor({ lang, labels, routes, activeStage }: {
+  lang: "zh" | "en"; labels: boolean; routes: boolean; activeStage: number;
 }) {
   const processLine = useMemo(() => PROCESS_PATH.map(([x, z]) => [x, 0.14, z] as [number, number, number]), []);
   return <group>
@@ -47,31 +47,32 @@ function WorkshopFloor({ lang, labels, routes }: {
       <meshStandardMaterial color="#485458" metalness={0.34} /></mesh>
     <mesh position={[23.72, 0.055, 0]}><boxGeometry args={[0.16, 0.08, 29.5]} />
       <meshStandardMaterial color="#485458" metalness={0.34} /></mesh>
-    <FloorBay position={[-12, -8]} size={[14, 7.2]} color="#54cdb7" />
-    <FloorBay position={[-2, 8]} size={[14, 7.2]} color="#61aed0" />
+    <FloorBay position={[-3, -8]} size={[24, 7.2]} color="#54cdb7" />
+    <FloorBay position={[-3, 8]} size={[24, 7.2]} color="#61aed0" />
     <FloorBay position={[17.5, 8]} size={[11.8, 7.2]} color="#82c8b0" />
     <FloorBay position={[-20, -8]} size={[5.4, 8]} color="#d4ad69" />
     <FloorBay position={[20, -8]} size={[5.4, 7]} color="#d4ad69" />
     <FloorBay position={[-20, 9.8]} size={[5.4, 9]} color="#9aadb2" />
     {routes && <>
       <Line points={processLine} color="#72dfb9" lineWidth={2.4} dashed dashSize={0.62} gapSize={0.3} />
-      {PROCESS_STAGES.map(({ id, position }) => <ProcessStation key={id} id={id} position={position} />)}
-      <RouteArrow from={[-17, 0.19, -8]} to={[-15, 0.19, -8]} color="#72dfb9" />
-      <RouteArrow from={[-1, 0.19, 13]} to={[1, 0.19, 13]} color="#72dfb9" />
-      <RouteArrow from={[22, 0.19, 3]} to={[22, 0.19, 1]} color="#72dfb9" />
-      <RouteArrow from={[16, 0.19, -8]} to={[18, 0.19, -8]} color="#72dfb9" />
+      {PROCESS_STAGES.map(({ id, position }, index) => <ProcessStation key={id} id={id} position={position}
+        active={activeStage === index} />)}
+      <RouteArrow from={[-16, 0.19, -6]} to={[-16, 0.19, -4]} color="#72dfb9" />
+      <RouteArrow from={[-1, 0.19, 1.2]} to={[1, 0.19, 1.2]} color="#72dfb9" />
+      <RouteArrow from={[20, 0.19, 2]} to={[20, 0.19, 4]} color="#72dfb9" />
+      <RouteArrow from={[21, 0.19, -2]} to={[21, 0.19, -4]} color="#72dfb9" />
     </>}
     <AisleMarks />
     {labels && Object.entries(zoneLabels).map(([zone, entry]) => {
       const places: Record<string, [number, number]> = {
-        raw: [-20, -13.45], turning: [-10, -4.6], milling: [-2, 12.65], post: [17, 4.1],
+        raw: [-20, -13.45], turning: [-3, -12.6], milling: [-2, 12.65], post: [17, 12.4],
         quality: [13, -11.2], finished: [20, -12.45], support: [-20, 14],
       };
       return <ZoneSign key={zone} position={places[zone]} rotationY={places[zone][1] > 0 ? Math.PI : 0}
         label={lang === "zh" ? entry.zh : entry.en} color={entry.color} />;
     })}
     {labels && <WorldPlate name="aisle-label" position={[0, 0.16, -1.48]} rotation={[-Math.PI / 2, 0, 0]}
-      size={[4.6, 0.38]} title={lang === "zh" ? "AGV · AMR 共用物流通道" : "AGV · AMR LOGISTICS AISLE"} accent="#74c9b1" />}
+      size={[6.2, 0.58]} title={lang === "zh" ? "AGV · AMR 共用物流通道" : "AGV · AMR LOGISTICS AISLE"} accent="#74c9b1" />}
   </group>;
 }
 
@@ -118,27 +119,11 @@ function RouteArrow({ from, to, color }: {
   </mesh>;
 }
 
-function ProcessStation({ id, position }: { id: string; position: [number, number] }) {
+function ProcessStation({ id, position, active }: { id: string; position: [number, number]; active: boolean }) {
   return <mesh name={`process-station-${id}`} position={[position[0], 0.19, position[1]]} rotation-x={-Math.PI / 2}>
-    <ringGeometry args={[0.48, 0.57, 32]} />
-    <meshBasicMaterial color="#9cf2d4" transparent opacity={0.9} side={THREE.DoubleSide} />
+    <ringGeometry args={[active ? 0.66 : 0.48, active ? 0.8 : 0.57, 32]} />
+    <meshBasicMaterial color={active ? "#f2c86b" : "#9cf2d4"} transparent opacity={0.95} side={THREE.DoubleSide} />
   </mesh>;
-}
-
-function Workpiece({ elapsed }: { elapsed: number }) {
-  const pose = processPose(elapsed + 14);
-  return <group position={[pose.position[0], 0.48, pose.position[1]]} rotation-y={-pose.heading}>
-    <mesh castShadow position={[0, 0.08, 0]}><boxGeometry args={[0.95, 0.13, 0.72]} />
-      <meshStandardMaterial color="#386b61" metalness={0.42} roughness={0.3} /></mesh>
-    <mesh castShadow rotation-z={Math.PI / 2} position={[0, 0.31, 0]}>
-      <cylinderGeometry args={[0.18, 0.18, 0.72, 20]} />
-      <meshStandardMaterial color="#d7e2de" metalness={0.88} roughness={0.19} emissive="#477f72" emissiveIntensity={0.12} />
-    </mesh>
-    <mesh castShadow rotation-z={Math.PI / 2} position={[-0.26, 0.31, 0]}>
-      <cylinderGeometry args={[0.24, 0.24, 0.12, 20]} />
-      <meshStandardMaterial color="#a8b7b0" metalness={0.82} roughness={0.23} />
-    </mesh>
-  </group>;
 }
 
 function Roof({ visible }: { visible: boolean }) {
@@ -168,25 +153,39 @@ function Backdrop({ lang }: { lang: "zh" | "en" }) {
   </>;
 }
 
-function CameraRig({ view, controls, focusPosition }: {
+function CameraRig({ view, controls, focusPosition, focusHeight, selectedId }: {
   view: ViewMode; controls: React.RefObject<any>; focusPosition?: [number, number];
+  focusHeight: number; selectedId: string | null;
 }) {
-  const target = useMemo(() => view === "focus" && focusPosition
-    ? new THREE.Vector3(focusPosition[0], 1.45, focusPosition[1])
-    : new THREE.Vector3(0, 0, 0), [view, focusPosition]);
-  const eye = useMemo(() => view === "top"
-    ? new THREE.Vector3(0, 60, 0.015)
-    : view === "focus"
-      ? target.clone().add(new THREE.Vector3(6, 3.2, 10))
-      : new THREE.Vector3(35, 38, 43), [view, target]);
+  const latest = useRef({ focusPosition, focusHeight });
+  latest.current = { focusPosition, focusHeight };
   useLayoutEffect(() => {
     const control = controls.current;
     if (!control) return;
-    control.minDistance = view === "focus" ? 5 : 16;
+    const point = latest.current.focusPosition;
+    const target = view === 'focus' && point
+      ? new THREE.Vector3(point[0], latest.current.focusHeight, point[1]) : new THREE.Vector3();
+    const eye = view === 'top' ? new THREE.Vector3(0, 60, 0.015)
+      : view === 'focus' ? target.clone().add(selectedId === 'P001' ? new THREE.Vector3(4, 9, 8)
+        : new THREE.Vector3(6, 5.2, selectedId?.startsWith('M0') ? -10 : 10))
+      : new THREE.Vector3(35, 38, 43);
+    control.minDistance = view === 'focus' ? 5 : 16;
     control.target.copy(target);
     control.object.position.copy(eye);
     control.update();
-  }, [view, controls, eye, target]);
+  }, [view, selectedId, controls]);
+  useFrame(({ gl, camera }) => {
+    const control = controls.current;
+    if (view !== 'focus' || !focusPosition || !control) return;
+    const target = new THREE.Vector3(focusPosition[0], focusHeight, focusPosition[1]);
+    const shift = target.clone().sub(control.target);
+    camera.position.add(shift);
+    control.target.copy(target);
+    control.update();
+    const projected = target.clone().project(camera);
+    gl.domElement.dataset.focusX = projected.x.toFixed(4);
+    gl.domElement.dataset.focusY = projected.y.toFixed(4);
+  });
   return null;
 }
 
@@ -198,6 +197,9 @@ export function WorkshopScene({
   view: ViewMode; focusPosition?: [number, number]; copy: Copy; onReady: () => void;
 }) {
   const controls = useRef<any>(null);
+  const carrierPose = processPose(state.elapsed);
+  const selectedAsset = selectedId === WORKPIECE_ASSET.id ? WORKPIECE_ASSET : ASSETS.find(({ id }) => id === selectedId);
+  const focusPose = selectedAsset ? assetPose(selectedAsset, state.elapsed) : undefined;
   const zoneTitles: Record<string, string> = useMemo(() => Object.fromEntries(
     Object.entries(zoneLabels).map(([key, value]) => [key, lang === "zh" ? value.zh : value.en]),
   ), [lang]);
@@ -215,38 +217,52 @@ export function WorkshopScene({
       <directionalLight position={[12, 14, 20]} intensity={0.56} color="#a5d5df" />
       <pointLight position={[-5, 10, 0]} intensity={40} distance={35} color="#78d7b4" />
       <pointLight position={[16, 9, 4]} intensity={32} distance={30} color="#76c4da" />
-      <WorkshopFloor lang={lang} labels={showLabels} routes={showRoutes} />
-      <Roof visible={view !== "top"} />
+      <WorkshopFloor lang={lang} labels={showLabels} routes={showRoutes} activeStage={processPose(state.elapsed).stageIndex} />
+      <Roof visible={view === "orbit"} />
       {ASSETS.filter(({ kind }) => kind === "lathe" || kind === "mill").map((asset) => {
         const machine = state.machines[asset.id];
         const selected = selectedId === asset.id;
         const faulted = machine?.status === "fault";
         const onClick = () => onSelect(asset);
         return <group key={asset.id} position={[asset.position[0], 0, asset.position[1]]}>
-          <group rotation-y={Math.PI}>
-            {asset.kind === "lathe" ? <Lathe selected={selected} onSelect={onClick} faulted={faulted}
-              cutaway={view === "focus" && selected} /> :
-              <Mill selected={selected} onSelect={onClick} faulted={faulted} cutaway={view === "focus" && selected} />}
+          <group rotation-y={asset.kind === "lathe" ? Math.PI : 0}>
+            {asset.kind === "lathe" ? <Lathe selected={selected} onSelect={onClick} faulted={faulted} elapsed={state.elapsed}
+              cutaway={(view === "focus" && selected) || (asset.id === PROCESS_STAGES[carrierPose.stageIndex].id && ['load', 'unload', 'process'].includes(carrierPose.phase))} /> :
+              <Mill selected={selected} onSelect={onClick} faulted={faulted} elapsed={state.elapsed}
+                cutaway={(view === "focus" && selected) || (asset.id === PROCESS_STAGES[carrierPose.stageIndex].id && ['load', 'unload', 'process'].includes(carrierPose.phase))} />}
           </group>
           {showLabels && <TagFromParent asset={asset} zone={zoneTitles[asset.zone] ?? ""} selected={selected}
             status={machine?.status ?? "idle"} onSelect={onClick} copy={copy} />}
         </group>;
       })}
-      {ASSETS.filter(({ kind }) => kind === "robot").map((asset, index) => {
-        const machine = state.machines[index === 0 ? "L01" : "M01"];
+      {ROBOT_CELLS.map((cell, index) => {
+        const asset = ASSETS.find(({ id }) => id === cell.id)!;
+        const pose = robotPose(state.elapsed, index);
+        const machine = state.machines[pose.machineId];
         const rotation = asset.id === "R01" ? Math.PI / 2 : -Math.PI / 2;
-        return <Robot key={asset.id} asset={asset} machine={machine} rotation={rotation}
+        return <group key={asset.id}>
+          <RobotRail position={[-3, cell.trackZ]} />
+          <Robot asset={asset} machine={machine} rotation={rotation} position={pose.position}
+            elapsed={state.elapsed} showLabels={showLabels}
+            tip={PROCESS_STAGES[carrierPose.stageIndex].id === pose.machineId && ['load', 'unload'].includes(carrierPose.phase)
+              ? carrierPose.workpiecePosition : undefined}
+            selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />
+        </group>;
+      })}
+      {ASSETS.filter(({ kind }) => kind === "amr").map((asset, index) => {
+        const pose = index === 0 ? carrierPose : amrPose(state.elapsed, index);
+        return <AMR key={asset.id} asset={asset} position={pose.position} heading={pose.heading}
+          carrying={false} showLabels={showLabels} elapsed={state.elapsed}
           selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />;
       })}
-      {ASSETS.filter(({ kind }) => kind === "amr").map((asset, index) => <AMR key={asset.id} asset={asset}
-        position={amrPose(state.elapsed, index).position} heading={amrPose(state.elapsed, index).heading}
-        selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />)}
-      {showRoutes && <Workpiece elapsed={state.elapsed} />}
+      <MovingWorkpiece position={carrierPose.workpiecePosition} stage={carrierPose.stageIndex}
+        rotating={carrierPose.phase === 'process'} elapsed={state.elapsed} onSelect={() => onSelect(WORKPIECE_ASSET)} />
       {ASSETS.filter(({ kind }) => !["lathe", "mill", "robot", "amr"].includes(kind)).map((asset) =>
-        <StaticAsset key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />)}
-      <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.07} minPolarAngle={0.12}
+        <StaticAsset key={asset.id} asset={asset} showLabels={showLabels} selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />)}
+      <OrbitControls ref={controls} makeDefault enableDamping enablePan={view !== "focus"} dampingFactor={0.07} minPolarAngle={0.12}
         maxPolarAngle={Math.PI * 0.48} minDistance={16} maxDistance={75} target={[0, 0, 0]} />
-      <CameraRig view={view} controls={controls} focusPosition={focusPosition} />
+      <CameraRig view={view} controls={controls} focusPosition={focusPose?.position}
+        focusHeight={focusPose?.height ?? 1.5} selectedId={selectedId} />
     </Suspense>
   </Canvas>;
 }
@@ -256,24 +272,23 @@ function TagFromParent({ asset, zone, selected, status, onSelect, copy }: {
   onSelect: () => void; copy: Copy;
 }) {
   const colors: Record<string, string> = { running: "#57d5ad", setup: "#efb35a", idle: "#758894", fault: "#fa655b" };
-  return <WorldPlate name={`machine-label-${asset.id}`} position={[0, 0.18, 3.25]} rotation={[-Math.PI / 2, 0, 0]}
-    size={[1.8, 0.42]} title={`${asset.id} · ${copy[status as keyof Copy] ?? status}`}
+  return <WorldPlate name={`machine-label-${asset.id}`} position={[asset.footprint[0] / 2 + 1.65, 0.18, 0]}
+    rotation={[-Math.PI / 2, 0, 0]} size={[2.7, 0.66]} title={`${asset.id} · ${copy[status as keyof Copy] ?? status}`}
     detail={zone} accent={colors[status] ?? colors.idle} active={selected} onClick={onSelect} />;
 }
 
-function amrPose(elapsed: number, index: number) {
-  const distance = 88.8, speed = 1.2;
-  let t = ((Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0) * speed + index * distance / 2) % distance;
-  const points = AMR_PATH;
-  for (let i = 1; i < points.length; i++) {
-    const from = points[i - 1], to = points[i];
-    const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
-    if (t <= length) {
-      const ratio = length ? t / length : 0;
-      return { position: [from[0] + (to[0] - from[0]) * ratio, from[1] + (to[1] - from[1]) * ratio] as [number, number],
-        heading: Math.atan2(to[1] - from[1], to[0] - from[0]) };
-    }
-    t -= length;
-  }
-  return { position: [points[0][0], points[0][1]] as [number, number], heading: 0 };
+function MovingWorkpiece({ position, stage, rotating, elapsed, onSelect }: {
+  position: [number, number, number]; stage: number; rotating: boolean; elapsed: number; onSelect: () => void;
+}) {
+  return <group name="tracked-workpiece" position={position} rotation-x={rotating ? elapsed * 3 : 0}
+    onClick={(event) => { event.stopPropagation(); onSelect(); }}>
+    <mesh castShadow rotation-z={Math.PI / 2}>
+      <cylinderGeometry args={[stage < 2 ? 0.24 : 0.17, stage < 2 ? 0.24 : 0.17, 0.85, 24]} />
+      <meshStandardMaterial color="#e8e6cf" metalness={0.8} roughness={0.22} emissive="#c49f48" emissiveIntensity={0.35} />
+    </mesh>
+    {stage >= 2 && [-0.24, 0.23].map((x) => <mesh key={x} position={[x, 0, 0]} rotation-z={Math.PI / 2}>
+      <cylinderGeometry args={[0.26, 0.26, 0.12, 24]} />
+      <meshStandardMaterial color="#c7d4cc" metalness={0.85} roughness={0.2} />
+    </mesh>)}
+  </group>;
 }

@@ -25,7 +25,7 @@ export function WorldPlate({ position, rotation = [0, 0, 0], size, title, detail
     context.fillRect(0, 0, 8, canvas.height);
     context.fillStyle = "#e3ece6";
     context.textBaseline = "middle";
-    let titleSize = 56;
+    let titleSize = 66;
     context.font = `600 ${titleSize}px Arial, 'Microsoft YaHei', sans-serif`;
     while (titleSize > 30 && context.measureText(title).width > 465) {
       titleSize -= 2;
@@ -34,7 +34,7 @@ export function WorldPlate({ position, rotation = [0, 0, 0], size, title, detail
     context.fillText(title, 25, detail ? 49 : 48, 465);
     if (detail) {
       context.fillStyle = "#91a39a";
-      context.font = "32px Arial, 'Microsoft YaHei', sans-serif";
+      context.font = "36px Arial, 'Microsoft YaHei', sans-serif";
       context.fillText(detail, 25, 105, 465);
     }
     context.strokeStyle = active ? accent : "#52625e";
@@ -60,12 +60,12 @@ function Tag({ asset, active, onSelect, position }: {
   const color = statusColor[asset.kind === "lathe" || asset.kind === "mill" ? "running" : "idle"];
   const z = position?.[2] ?? asset.footprint[1] / 2 + 0.16;
   return <WorldPlate name={`asset-label-${asset.id}`} position={position ?? [0, 0.16, z]}
-    rotation={[-Math.PI / 2, 0, 0]} size={[1.7, 0.42]} title={asset.id} detail={asset.name.zh}
+    rotation={[-Math.PI / 2, 0, 0]} size={[2.45, 0.62]} title={asset.id} detail={asset.name.zh}
     accent={color} active={active} onClick={() => onSelect(asset)} />;
 }
 
-export function Lathe({ selected, onSelect, faulted = false, cutaway = false }: {
-  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean;
+export function Lathe({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0 }: {
+  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number;
 }) {
   const spindle = useRef<THREE.Group>(null);
   const tool = useRef<THREE.Group>(null);
@@ -73,8 +73,8 @@ export function Lathe({ selected, onSelect, faulted = false, cutaway = false }: 
   const status = faulted ? statusColor.fault : statusColor.running;
   useFrame((_, delta) => {
     if (faulted) return;
-    progress.current += delta;
-    if (spindle.current) spindle.current.rotation.z += delta * 4.2;
+    progress.current = elapsed;
+    if (spindle.current) spindle.current.rotation.z = elapsed * 4.2;
     if (tool.current) tool.current.position.x = -1.08 + Math.sin(progress.current * 0.65) * 0.24;
   });
   return (
@@ -90,10 +90,10 @@ export function Lathe({ selected, onSelect, faulted = false, cutaway = false }: 
         <meshStandardMaterial color="#405761" metalness={0.48} roughness={0.36} /></mesh>}
       {[-1.38, 1.38].map((x) => <mesh key={`door-${x}`} position={[x, 1.58, -1.71]}>
         <boxGeometry args={[0.12, 2.18, 0.12]} /><meshStandardMaterial color="#a7b4b3" metalness={0.78} roughness={0.3} /></mesh>)}
-      <mesh castShadow position={[-0.08, 3.02, 0]}>
+      {!cutaway && <mesh castShadow position={[-0.08, 3.02, 0]}>
         <boxGeometry args={[4.25, 0.18, 3.55]} />
         <meshStandardMaterial color="#80939a" metalness={0.55} roughness={0.35} />
-      </mesh>
+      </mesh>}
       <mesh position={[0.28, 1.58, -1.74]}>
         <boxGeometry args={[2.75, 1.75, 0.055]} />
         <meshStandardMaterial color="#17333b" transparent opacity={0.16} metalness={0.1} roughness={0.18} />
@@ -129,8 +129,8 @@ export function Lathe({ selected, onSelect, faulted = false, cutaway = false }: 
   );
 }
 
-export function Mill({ selected, onSelect, faulted = false, cutaway = false }: {
-  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean;
+export function Mill({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0 }: {
+  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number;
 }) {
   const spindleHead = useRef<THREE.Group>(null);
   const table = useRef<THREE.Group>(null);
@@ -138,10 +138,10 @@ export function Mill({ selected, onSelect, faulted = false, cutaway = false }: {
   const status = faulted ? statusColor.fault : statusColor.running;
   useFrame((_, delta) => {
     if (faulted) return;
-    progress.current += delta;
+    progress.current = elapsed;
     if (spindleHead.current) {
       spindleHead.current.position.y = 2.2 + Math.sin(progress.current * 0.7) * 0.23;
-      spindleHead.current.rotation.y += delta * 4.8;
+      spindleHead.current.rotation.y = elapsed * 4.8;
     }
     if (table.current) table.current.position.x = Math.sin(progress.current * 0.45) * 0.3;
   });
@@ -222,59 +222,81 @@ function SelectionHalo({ color }: { color: string }) {
   </mesh>;
 }
 
-export function Robot({ asset, machine, rotation, selected, onSelect }: {
-  asset: WorkshopAsset; machine: MachineModel; rotation: number; selected: boolean; onSelect: () => void;
-}) {
-  const shoulder = useRef<THREE.Group>(null);
-  const elbow = useRef<THREE.Group>(null);
-  const progress = useRef(0.4);
-  useFrame((_, delta) => {
-    if (machine.status === "fault" || machine.status === "idle") return;
-    progress.current += delta * (machine.status === "setup" ? 0.13 : 0.48);
-    const t = progress.current;
-    if (shoulder.current) shoulder.current.rotation.z = -0.5 + Math.sin(t) * 0.3;
-    if (elbow.current) elbow.current.rotation.z = 0.7 + Math.sin(t + 0.9) * 0.48;
-  });
-  const body = "#e5a648";
-  return <group position={[asset.position[0], 0, asset.position[1]]} rotation-y={rotation} onClick={(event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation(); onSelect();
-  }}>
-    <mesh castShadow position={[0, 0.22, 0]}><cylinderGeometry args={[0.58, 0.68, 0.44, 24]} />
-      <meshStandardMaterial color="#36434a" metalness={0.7} roughness={0.35} /></mesh>
-    <mesh position={[0, 0.48, 0]}><cylinderGeometry args={[0.14, 0.14, 0.1, 20]} />
-      <meshStandardMaterial color="#52d6ad" emissive="#52d6ad" emissiveIntensity={0.75} /></mesh>
-    <group ref={shoulder} position={[0, 0.62, 0]}>
-      <mesh castShadow position={[0.52, 0.53, 0]} rotation-z={-0.62}>
-        <boxGeometry args={[1.38, 0.32, 0.34]} /><meshStandardMaterial color={body} metalness={0.48} roughness={0.32} /></mesh>
-      <mesh castShadow position={[1.04, 0.99, 0]}><sphereGeometry args={[0.27, 18, 14]} />
-        <meshStandardMaterial color="#596c72" metalness={0.73} roughness={0.28} /></mesh>
-      <group ref={elbow} position={[1.04, 0.99, 0]}>
-        <mesh castShadow position={[0.6, 0.15, 0]} rotation-z={0.25}>
-          <boxGeometry args={[1.25, 0.24, 0.25]} /><meshStandardMaterial color={body} metalness={0.5} roughness={0.32} /></mesh>
-        <mesh castShadow position={[1.18, 0.31, 0]} rotation-z={0.55}>
-          <boxGeometry args={[0.39, 0.11, 0.17]} /><meshStandardMaterial color="#48585e" metalness={0.75} roughness={0.27} /></mesh>
-        <mesh position={[1.34, 0.39, 0]}><sphereGeometry args={[0.055, 12, 10]} />
-          <meshStandardMaterial color={machine.status === "fault" ? "#fa655b" : "#71e1c1"} emissive="#2aab87" emissiveIntensity={1.1} /></mesh>
-      </group>
-    </group>
-    {selected && <SelectionHalo color="#70e5ce" />}
-    <Tag asset={asset} active={selected} onSelect={() => onSelect()} />
+export function RobotRail({ position }: { position: [number, number] }) {
+  return <group position={[position[0], 0, position[1]]}>
+    <mesh position={[0, 0.11, 0]}><boxGeometry args={[20, 0.2, 0.92]} />
+      <meshStandardMaterial color="#37464c" metalness={0.62} roughness={0.36} /></mesh>
+    {[-0.31, 0.31].map((z) => <mesh key={z} position={[0, 0.23, z]}>
+      <boxGeometry args={[20, 0.08, 0.12]} />
+      <meshStandardMaterial color="#9aa9a7" metalness={0.82} roughness={0.25} /></mesh>)}
+    {Array.from({ length: 21 }, (_, index) => <mesh key={index} position={[-9.6 + index * 0.96, 0.045, 0]}>
+      <boxGeometry args={[0.1, 0.06, 0.74]} />
+      <meshStandardMaterial color="#65757a" metalness={0.5} roughness={0.38} /></mesh>)}
   </group>;
 }
 
-export function AMR({ asset, position, heading, selected, onSelect }: {
-  asset: WorkshopAsset; position: [number, number]; heading: number; selected: boolean; onSelect: () => void;
+function ArmLink({ from, to }: { from: THREE.Vector3; to: THREE.Vector3 }) {
+  const direction = to.clone().sub(from);
+  const middle = from.clone().add(to).multiplyScalar(0.5);
+  const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+  return <mesh castShadow position={middle} quaternion={rotation}>
+    <boxGeometry args={[0.27, direction.length(), 0.29]} />
+    <meshStandardMaterial color="#e4ab50" metalness={0.5} roughness={0.3} />
+  </mesh>;
+}
+
+export function Robot({ asset, machine, rotation, position, selected, onSelect, elapsed, tip, showLabels = true }: {
+  asset: WorkshopAsset; machine: MachineModel; rotation: number; position: [number, number]; elapsed: number;
+  selected: boolean; onSelect: () => void; tip?: [number, number, number]; showLabels?: boolean;
+}) {
+  const reach = tip ? new THREE.Vector3(tip[0] - position[0], tip[1], tip[2] - position[1])
+    : new THREE.Vector3(0, 1.35 + Math.sin(elapsed * 1.3) * 0.2, asset.id === 'R01' ? -2.5 : 2.5);
+  const root = new THREE.Vector3(0, 0.68, 0);
+  const elbow = root.clone().lerp(reach, 0.48);
+  elbow.y += 1.4;
+  return <group position={[position[0], 0, position[1]]} onClick={(event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation(); onSelect();
+  }}>
+    <mesh castShadow position={[0, 0.22, 0]}><boxGeometry args={[1.25, 0.35, 0.86]} />
+      <meshStandardMaterial color="#4b5e63" metalness={0.7} roughness={0.3} /></mesh>
+    <mesh castShadow position={[0, 0.5, 0]}><cylinderGeometry args={[0.43, 0.5, 0.45, 24]} />
+      <meshStandardMaterial color="#273c40" metalness={0.7} roughness={0.3} /></mesh>
+    <ArmLink from={root} to={elbow} /><ArmLink from={elbow} to={reach} />
+    {[root, elbow, reach].map((joint, index) => <mesh key={index} position={joint} castShadow>
+      <sphereGeometry args={[index === 2 ? 0.16 : 0.24, 16, 12]} />
+      <meshStandardMaterial color="#758d8c" metalness={0.8} roughness={0.25} /></mesh>)}
+    <group position={reach}>
+      {[-0.2, 0.2].map((x) => <mesh key={x} castShadow position={[x, -0.13, 0]}>
+        <boxGeometry args={[0.09, 0.35, 0.2]} /><meshStandardMaterial color="#c1c9c0" metalness={0.8} roughness={0.2} /></mesh>)}
+    </group>
+    {selected && <SelectionHalo color="#70e5ce" />}
+    {showLabels && <Tag asset={asset} active={selected} onSelect={() => onSelect()} position={[1.7, 0.32, 0]} />}
+  </group>;
+}
+
+export function AMR({ asset, position, heading, selected, carrying = false, onSelect, showLabels = true, elapsed = 0 }: {
+  asset: WorkshopAsset; position: [number, number]; heading: number; selected: boolean;
+  carrying?: boolean; onSelect: () => void; showLabels?: boolean; elapsed?: number;
 }) {
   const lidar = useRef<THREE.Group>(null);
-  useFrame((_, delta) => { if (lidar.current) lidar.current.rotation.y += delta * 1.2; });
+  useFrame((_, delta) => { if (lidar.current) lidar.current.rotation.y = elapsed * 1.2; });
   return <group position={[position[0], 0, position[1]]} rotation-y={-heading}
     onClick={(event: ThreeEvent<MouseEvent>) => { event.stopPropagation(); onSelect(); }}>
     <mesh castShadow position={[0, 0.27, 0]}><boxGeometry args={[1.62, 0.43, 1.04]} />
       <meshStandardMaterial color="#21b9a5" metalness={0.42} roughness={0.31} /></mesh>
     <mesh castShadow position={[0, 0.51, 0]}><boxGeometry args={[1.22, 0.13, 0.78]} />
       <meshStandardMaterial color="#9aab9f" metalness={0.3} roughness={0.48} /></mesh>
-    <mesh castShadow position={[0.02, 0.72, 0.02]}><boxGeometry args={[0.7, 0.3, 0.56]} />
-      <meshStandardMaterial color="#c58e4e" metalness={0.24} roughness={0.46} /></mesh>
+    {carrying ? <group position={[0.02, 0.76, 0]}>
+      <mesh castShadow rotation-z={Math.PI / 2}><cylinderGeometry args={[0.16, 0.16, 0.72, 24]} />
+        <meshStandardMaterial color="#dbe4df" metalness={0.9} roughness={0.18} /></mesh>
+      <mesh castShadow position={[-0.22, 0, 0]} rotation-z={Math.PI / 2}>
+        <cylinderGeometry args={[0.23, 0.23, 0.13, 24]} />
+        <meshStandardMaterial color="#aebcb6" metalness={0.86} roughness={0.2} /></mesh>
+      <mesh castShadow position={[0.23, 0, 0]} rotation-z={Math.PI / 2}>
+        <cylinderGeometry args={[0.2, 0.2, 0.16, 24]} />
+        <meshStandardMaterial color="#b9c6c1" metalness={0.86} roughness={0.2} /></mesh>
+    </group> : asset.id === 'AMR02' ? <mesh castShadow position={[0.02, 0.72, 0.02]}><boxGeometry args={[0.7, 0.3, 0.56]} />
+      <meshStandardMaterial color="#c58e4e" metalness={0.24} roughness={0.46} /></mesh> : null}
     <group ref={lidar} position={[-0.5, 0.66, 0]}>
       <mesh><cylinderGeometry args={[0.08, 0.1, 0.26, 16]} />
         <meshStandardMaterial color="#d6e4da" metalness={0.75} roughness={0.23} /></mesh>
@@ -289,12 +311,12 @@ export function AMR({ asset, position, heading, selected, onSelect }: {
       <mesh key={`${x}:${z}`} position={[x, 0.13, z]} rotation-z={Math.PI / 2}>
         <cylinderGeometry args={[0.09, 0.09, 0.08, 14]} /><meshStandardMaterial color="#11191c" /></mesh>)}
     {selected && <SelectionHalo color="#70e5ce" />}
-    <Tag asset={asset} active={selected} onSelect={onSelect} position={[0, 0.16, 0.76]} />
+    {showLabels && <Tag asset={asset} active={selected} onSelect={onSelect} position={[0, 0.16, 1.15]} />}
   </group>;
 }
 
-export function StaticAsset({ asset, selected, onSelect }: {
-  asset: WorkshopAsset; selected: boolean; onSelect: () => void;
+export function StaticAsset({ asset, selected, onSelect, showLabels = true }: {
+  asset: WorkshopAsset; selected: boolean; onSelect: () => void; showLabels?: boolean;
 }) {
   const { kind, footprint } = asset;
   const [w, d] = footprint;
@@ -311,7 +333,7 @@ export function StaticAsset({ asset, selected, onSelect }: {
       kind === "buffer" ? <BufferSlots w={w} d={d} /> :
       kind === "charger" ? <ChargePad w={w} d={d} /> : <WorkStation kind={kind} w={w} d={d} height={height} material={material} />}
     {selected && <SelectionHalo color="#70e5ce" />}
-    <Tag asset={asset} active={selected} onSelect={onSelect} />
+    {showLabels && <Tag asset={asset} active={selected} onSelect={onSelect} />}
   </group>;
 }
 
@@ -401,14 +423,6 @@ function MeasureGauge() {
 export function ZoneSign({ position, rotationY = 0, label, color }: {
   position: [number, number]; rotationY?: number; label: string; color: string;
 }) {
-  return <group position={[position[0], 0, position[1]]} rotation-y={rotationY}>
-    <mesh position={[0, 0.88, 0]}><boxGeometry args={[2.8, 0.46, 0.11]} />
-      <meshStandardMaterial color="#18252a" metalness={0.28} roughness={0.45} /></mesh>
-    <mesh position={[-1.27, 0.88, 0.07]}><boxGeometry args={[0.045, 0.25, 0.012]} />
-      <meshBasicMaterial color={color} /></mesh>
-    <WorldPlate name={`zone-label-${label}`} position={[0, 0.89, 0.08]} size={[2.8, 0.46]}
-      title={label} accent={color} />
-    {[-1.25, 1.25].map((x) => <mesh key={x} position={[x, 0.41, 0]}>
-      <boxGeometry args={[0.08, 0.78, 0.08]} /><meshStandardMaterial color="#47585d" metalness={0.5} /></mesh>)}
-  </group>;
+  return <WorldPlate name={`zone-label-${label}`} position={[position[0], 0.16, position[1]]}
+    rotation={[-Math.PI / 2, 0, rotationY]} size={[4.2, 0.72]} title={label} accent={color} />;
 }

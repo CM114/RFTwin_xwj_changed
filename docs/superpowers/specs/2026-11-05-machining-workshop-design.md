@@ -15,8 +15,11 @@ The user approved the proposed floor plan and requested implementation and publi
 
 - Scene labels are textured plates attached to fixed world coordinates, so orbiting the camera never makes a label follow the viewer. Zone signs are oriented toward their aisle; asset labels sit at the associated machine or station.
 - AMRs have a clearly readable chassis, cargo deck, lidar and direction indicator, and circulate on the central aisle loop.
-- Lathe and machining-center enclosures expose their spindle, tool and worktable through front windows. Selecting a machine and choosing Focus opens a closer view and removes that machine's top panel to reveal the working area.
-- The complete illustrative part route is shown by default, from raw stock through turning, milling, deburring, washing and dimensional inspection to finished goods. A moving workpiece marker travels the route; the footer repeats all seven stages.
+- Asset labels are larger flat planes anchored to the floor or station; clicking/selecting an asset locks the orbit target to its world coordinate and centers it in view.
+- Two rail-mounted tending robots serve three-machine cells: R01 serves L01-L03 and R02 serves M01-M03. Their moving rail poses and machine handoffs remain illustrative.
+- Lathe and machining-center enclosures expose their spindle, tool and worktable through front windows. Selecting a machine and focusing it opens a front elevated view and removes that machine's top panel to reveal the working area.
+- The complete illustrative part route is shown by default, from raw stock through turning, milling, deburring, washing and dimensional inspection to finished goods. AMR01 carries a visible shaft workpiece between the route handoffs, unloads at finished goods and returns empty; AMR02 continues its general aisle loop. The active stage is highlighted on the floor and in the footer.
+- Each station has explicit unloading, processing and loading phases during which the AMR waits. The two CNC robots use the moving workpiece position as their gripper target during handoff. Next operation advances the narrative to the next arrival; Follow part selects the workpiece itself through unloading, processing and delivery. Selecting an AMR continues tracking the vehicle, and moving selections continuously update the orbit target.
 - All machine motion and workpiece travel are visual demonstration behavior. They do not model machining parameters, part geometry changes, cycle times, quality outcomes or real equipment telemetry.
 
 ## Implementation boundaries

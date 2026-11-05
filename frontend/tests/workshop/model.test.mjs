@@ -28,10 +28,10 @@ const machineIds = ['L01', 'L02', 'L03', 'M01', 'M02', 'M03'];
 const expectedPositions = {
   L01: [-12, -8], L02: [-3, -8], L03: [6, -8],
   M01: [-12, 8], M02: [-3, 8], M03: [6, 8],
-  R01: [-12, -3.8], R02: [-12, 3.8], RAW: [-20, -8], FG: [20, -8],
+  R01: [-12, -4.8], R02: [-12, 4.8], AMR01: [-16, -8], RAW: [-20, -8], FG: [20, -8],
   D01: [14, 8], W01: [20, 8], Q01: [13, -8], HOLD: [13, -12], REWORK: [8, -12],
   TOOL: [-20, 8], MAINT: [-20, 12], CH01: [-20, 3.8], CH02: [-17, 3.8],
-  B01: [-6, -3.8], B02: [3, -3.8], B03: [10, 3.8], B04: [17, -3.8],
+  B01: [-6, -3.3], B02: [3, -3.3], B03: [10, 3.8], B04: [17, -3.8],
 };
 
 function close(actual, expected, tolerance = 1e-9) {
@@ -101,11 +101,11 @@ test('the closed AMR route clears stationary footprints with vehicle radius and 
 });
 
 test('AMRs travel at 1.2 m/s, wrap continuously, and stay half a loop apart', async () => {
-  const { AMR_PATH, ASSETS, amrPose } = await loadModel();
+  const { AMR_PATH, ASSETS, amrPose, processPose } = await loadModel();
   const perimeter = 88.8, period = perimeter / 1.2;
   assert.deepEqual(amrPose(0, 0), { position: [-21, -1.2], heading: 0 });
   assert.deepEqual(amrPose(0, 1), { position: [21, 1.2], heading: Math.PI });
-  assert.deepEqual(ASSETS.find(({ id }) => id === 'AMR01').position, amrPose(0, 0).position);
+  assert.deepEqual(ASSETS.find(({ id }) => id === 'AMR01').position, processPose(0).position);
   assert.deepEqual(ASSETS.find(({ id }) => id === 'AMR02').position, amrPose(0, 1).position);
   close(amrPose(10, 0).position[0], -9);
   close(amrPose(35, 0).position[0], 21);
@@ -124,30 +124,112 @@ test('AMRs travel at 1.2 m/s, wrap continuously, and stay half a loop apart', as
 });
 
 test('the workpiece flow connects raw stock, both CNC operations, finishing, inspection, and shipping', async () => {
-  const { ASSETS, PROCESS_STAGES, PROCESS_PATH } = await loadModel();
+  const { ASSETS, PROCESS_STAGES, PROCESS_PATH, PROCESS_SPEED, processPose } = await loadModel();
   assert.deepEqual(PROCESS_STAGES.map(({ id }) => id), ['RAW', 'L01', 'M01', 'D01', 'W01', 'Q01', 'FG']);
   for (const stage of PROCESS_STAGES) {
     const asset = ASSETS.find(({ id }) => id === stage.id);
-    assert.deepEqual(stage.position, asset.position, `${stage.id} stage is anchored to its real station`);
+    assert.ok(Math.hypot(stage.position[0] - asset.position[0], stage.position[1] - asset.position[1]) <= 5.1,
+      `${stage.id} transfer point stays next to its real station`);
+    assert.ok(PROCESS_PATH.some(([x, z]) => x === stage.position[0] && z === stage.position[1]),
+      `${stage.id} handoff lies on the carrier route`);
   }
   assert.deepEqual(PROCESS_PATH[0], PROCESS_STAGES[0].position);
-  assert.deepEqual(PROCESS_PATH.at(-1), PROCESS_STAGES.at(-1).position);
+  assert.ok(PROCESS_PATH.some(([x, z]) => x === PROCESS_STAGES.at(-1).position[0] && z === PROCESS_STAGES.at(-1).position[1]));
+  assert.deepEqual(ASSETS.find(({ id }) => id === 'AMR01').position, processPose(0).position,
+    'the dedicated process carrier starts beside raw stock');
   for (const point of PROCESS_PATH) {
     assert.ok(Math.abs(point[0]) <= 24 && Math.abs(point[1]) <= 15, `flow point ${point}`);
   }
 });
 
-test('a workpiece advances through the entire route and loops back to raw stock', async () => {
-  const { PROCESS_PATH, PROCESS_SPEED, processPose } = await loadModel();
-  const routeLength = PROCESS_PATH.slice(1).reduce((sum, point, index) =>
-    sum + Math.hypot(point[0] - PROCESS_PATH[index][0], point[1] - PROCESS_PATH[index][1]), 0);
-  const period = routeLength / PROCESS_SPEED;
-  assert.deepEqual(processPose(0), { position: [...PROCESS_PATH[0]], heading: Math.atan2(0, 1) });
-  const halfway = processPose(period / 2);
-  assert.notDeepEqual(halfway.position, PROCESS_PATH[0]);
-  assert.deepEqual(processPose(period), processPose(0));
+test('two rail-mounted tending robots cover every CNC machine in their process cells', async () => {
+  const { ASSETS, MACHINES, ROBOT_CELLS, robotPose } = await loadModel();
+  assert.deepEqual(ROBOT_CELLS.map(({ id, machineIds }) => [id, machineIds]), [
+    ['R01', ['L01', 'L02', 'L03']],
+    ['R02', ['M01', 'M02', 'M03']],
+  ]);
+  assert.deepEqual(ROBOT_CELLS.flatMap(({ machineIds }) => machineIds).sort(), MACHINES.map(({ id }) => id).sort());
+  for (const [index, ids] of [[0, ['L01', 'L02', 'L03']], [1, ['M01', 'M02', 'M03']]]) {
+    for (const [slot, id] of ids.entries()) {
+      const pose = Array.from({ length: 600 }, (_, time) => robotPose(time, index)).find((candidate) => candidate.machineId === id && candidate.position[0] === MACHINES.find(({ id: machineId }) => machineId === id).position[0]);
+      assert.ok(pose, `${id} is served during the demonstration`);
+      assert.equal(pose.machineId, id);
+      assert.equal(pose.position[0], MACHINES.find(({ id: machineId }) => machineId === id).position[0]);
+      assert.equal(pose.position[1], index === 0 ? -4.8 : 4.8);
+    }
+    assert.equal(ASSETS.some(({ id }) => id === ROBOT_CELLS[index].id), true);
+  }
+});
+
+test('the material carrier route avoids station bodies and robot rails', async () => {
+  const { ASSETS, PROCESS_PATH, ROBOT_CELLS } = await loadModel();
+  const radius = Math.hypot(1.7 / 2, 1.2 / 2);
+  for (let index = 1; index < PROCESS_PATH.length; index++) {
+    const from = PROCESS_PATH[index - 1], to = PROCESS_PATH[index];
+    const steps = Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1]) / 0.1);
+    for (let step = 0; step <= steps; step++) {
+      const x = from[0] + (to[0] - from[0]) * step / steps;
+      const z = from[1] + (to[1] - from[1]) * step / steps;
+      for (const asset of ASSETS.filter(({ kind }) => kind !== 'amr' && kind !== 'robot')) {
+        const dx = Math.max(0, Math.abs(x - asset.position[0]) - asset.footprint[0] / 2);
+        const dz = Math.max(0, Math.abs(z - asset.position[1]) - asset.footprint[1] / 2);
+        assert.ok(Math.hypot(dx, dz) >= radius + 0.1, `${asset.id} carrier clearance at ${x},${z}`);
+      }
+      for (const cell of ROBOT_CELLS) {
+        const dx = Math.max(0, Math.abs(x + 3) - 10);
+        const dz = Math.max(0, Math.abs(z - cell.trackZ) - 0.46);
+        assert.ok(Math.hypot(dx, dz) >= radius + 0.1, `${cell.id} rail clearance`);
+      }
+    }
+  }
+});
+
+test('a workpiece route is continuous and the AMR returns empty after delivering', async () => {
+  const { PROCESS_PATH, PROCESS_DURATION, PROCESS_TIMELINE, processPose } = await loadModel();
+  assert.deepEqual(PROCESS_PATH[0], PROCESS_PATH.at(-1));
+  assert.deepEqual(processPose(PROCESS_DURATION), { ...processPose(0), cycle: 1 });
   assert.deepEqual(processPose(-10), processPose(0));
   assert.deepEqual(processPose(Number.NaN), processPose(0));
+  const returning = PROCESS_TIMELINE.find(({ kind }) => kind === 'return');
+  assert.equal(processPose(returning.start + 1).carrying, false);
+  for (const phase of PROCESS_TIMELINE.filter(({ kind }) => kind === 'transport')) {
+    assert.equal(processPose(phase.start + 0.01).carrying, true);
+  }
+  for (let time = 0.1; time < PROCESS_DURATION; time += 0.1) {
+    const before = processPose(time - 0.1), after = processPose(time);
+    assert.ok(Math.hypot(after.position[0] - before.position[0], after.position[1] - before.position[1]) < 0.063);
+  }
+});
+
+test('the carrier stops for every station and transfers the workpiece into its working area', async () => {
+  const { PROCESS_TIMELINE, processPose, PROCESS_STAGES } = await loadModel();
+  assert.ok(Array.isArray(PROCESS_TIMELINE));
+  for (const [index, stage] of PROCESS_STAGES.entries()) {
+    const stop = PROCESS_TIMELINE.find((phase) => phase.stageIndex === index && phase.kind === 'unload');
+    if (index === 0) continue;
+    assert.ok(stop, stage.id);
+    const before = processPose(stop.start + 0.1);
+    const after = processPose(stop.start + stop.duration - 0.1);
+    assert.deepEqual(before.position, after.position, `${stage.id} AMR waits during handoff`);
+    assert.notDeepEqual(before.workpiecePosition, after.workpiecePosition, `${stage.id} workpiece leaves deck`);
+    if (index < PROCESS_STAGES.length - 1) {
+      const processing = PROCESS_TIMELINE.find((phase) => phase.stageIndex === index && phase.kind === 'process');
+      const working = processPose(processing.start + 1);
+      assert.equal(working.carrying, false);
+      assert.ok(Math.abs(working.workpiecePosition[2] - stage.position[1]) > 1);
+    }
+  }
+});
+
+test('following the workpiece tracks its working position after it leaves the AMR', async () => {
+  const { WORKPIECE_ASSET, assetPose, PROCESS_TIMELINE, processPose } = await loadModel();
+  const processing = PROCESS_TIMELINE.find(({ kind, stageIndex }) => kind === 'process' && stageIndex === 2);
+  const time = processing.start + 1;
+  const part = assetPose(WORKPIECE_ASSET, time);
+  const flow = processPose(time);
+  assert.deepEqual(part.position, [flow.workpiecePosition[0], flow.workpiecePosition[2]]);
+  assert.equal(part.height, flow.workpiecePosition[1]);
+  assert.notDeepEqual(part.position, flow.position);
 });
 
 test('reset creates independent deterministic machine state with the approved initial statuses', async () => {

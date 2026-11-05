@@ -23,7 +23,7 @@ test("workshop opens with a rendered factory and six selectable machine tools", 
 
 test("world labels stay anchored and the complete workpiece route is visible", async ({ page }) => {
   await openWorkshop(page);
-  await expect(page.getByTestId("workshop-stage")).toHaveAttribute("data-label-mode", "world");
+  await expect(page.getByTestId("workshop-stage")).toHaveAttribute("data-label-mode", "flat-world");
   await expect(page.locator(".machine-label, .scene-tag, .zone-sign")).toHaveCount(0);
   await expect(page.getByTestId("process-flow")).toContainText("原料");
   await expect(page.getByTestId("process-flow")).toContainText("车削");
@@ -43,6 +43,56 @@ test("selected machinery can be inspected in a focused close-up", async ({ page 
   await expect(page.getByTestId("workshop-stage")).toHaveAttribute("data-view-mode", "focus");
   await page.waitForTimeout(250);
   await page.screenshot({ path: "test-results/workshop-machine-focus.png", fullPage: true });
+});
+
+test("selecting an asset recenters the camera on its world position", async ({ page }) => {
+  await openWorkshop(page);
+  await page.getByTestId("asset-item-M02").click();
+  const stage = page.getByTestId("workshop-stage");
+  await expect(stage).toHaveAttribute("data-view-mode", "focus");
+  await expect(stage).toHaveAttribute("data-focus-target", "-3,8");
+  await expect.poll(async () => Number(await page.locator('canvas').getAttribute('data-focus-x'))).toBeCloseTo(0, 2);
+  await expect.poll(async () => Number(await page.locator('canvas').getAttribute('data-focus-y'))).toBeCloseTo(0, 2);
+});
+
+test("a workpiece rides AMR01 along the transfer route", async ({ page }) => {
+  await openWorkshop(page);
+  const stage = page.getByTestId("workshop-stage");
+  await expect(stage).toHaveAttribute("data-carrier", "AMR01");
+  await expect(page.getByTestId('carrier-stage')).toContainText('原料');
+  await page.getByRole('button', { name: '下一工序', exact: true }).click();
+  await expect(page.getByTestId('carrier-stage')).toContainText('数控车削');
+  await page.getByRole('button', { name: '跟随工件', exact: true }).click();
+  await expect(page.getByTestId('selected-id')).toHaveText('P001');
+  const start = await stage.getAttribute("data-carrier-position");
+  await page.waitForTimeout(900);
+  await expect(stage).not.toHaveAttribute("data-carrier-position", start ?? "");
+  await expect(page.getByTestId("carrier-stage")).toContainText("AMR01");
+});
+
+test("the two tending robots expose their three-machine service cells", async ({ page }) => {
+  await openWorkshop(page);
+  await page.getByTestId("asset-item-R01").click();
+  await expect(page.locator("[data-testid='selected-asset']")).toContainText("L01 / L02 / L03");
+  await page.getByTestId("asset-item-R02").click();
+  await expect(page.locator("[data-testid='selected-asset']")).toContainText("M01 / M02 / M03");
+});
+
+test('one part is handed off in sequence at every processing station', async ({ page }) => {
+  await openWorkshop(page);
+  await page.getByRole('button', { name: '等轴视角', exact: true }).click();
+  await page.screenshot({ path: 'test-results/workshop-flat-labels-overview.png', fullPage: true });
+  for (const station of ['数控车削', '加工中心', '去毛刺', '清洗', '尺寸检验', '成品']) {
+    await page.getByRole('button', { name: '下一工序', exact: true }).click();
+    await expect(page.getByTestId('carrier-stage')).toContainText(station);
+    await expect(page.getByTestId('workshop-stage')).toHaveAttribute('data-carrier-phase', 'unload', { timeout: 6000 });
+    if (station === '数控车削') {
+      await page.getByTestId('asset-item-R01').click();
+      await page.screenshot({ path: 'test-results/workshop-robot-handoff.png', fullPage: true });
+    }
+  }
+  await page.getByRole('button', { name: '跟随工件', exact: true }).click();
+  await expect.poll(async () => Math.abs(Number(await page.locator('canvas').getAttribute('data-focus-x')))).toBeLessThan(0.01);
 });
 
 test("machine fault and restoration update the shared scene state", async ({ page }) => {

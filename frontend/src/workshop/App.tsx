@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { advanceSimulation, ASSETS, createSimulation, setMachineFault } from "./model";
+import { advanceSimulation, assetPose, ASSETS, createSimulation, PROCESS_DURATION, PROCESS_TIMELINE, processPose, robotPose, setMachineFault, WORKPIECE_ASSET } from "./model";
 import type { Lang, SimulationState, WorkshopAsset } from "./model";
 import { copy } from "./copy";
 import type { Copy } from "./copy";
@@ -17,13 +17,14 @@ function storedLanguage(): Lang {
 }
 
 const machineIds = new Set(["L01", "L02", "L03", "M01", "M02", "M03"]);
-const robotMachine: Record<string, string> = { R01: "L01", R02: "M01" };
+const robotServiceCell: Record<string, string> = { R01: "L01 / L02 / L03", R02: "M01 / M02 / M03" };
 const statusClass: Record<string, string> = { running: "running", setup: "setup", idle: "idle", fault: "fault" };
 const viewPreset: Record<View, View> = { orbit: "orbit", top: "top", focus: "focus" };
 
 function machineFor(asset: WorkshopAsset | null, state: SimulationState) {
   if (!asset) return null;
-  const id = machineIds.has(asset.id) ? asset.id : robotMachine[asset.id];
+  const id = machineIds.has(asset.id) ? asset.id : asset.kind === 'robot'
+    ? robotPose(state.elapsed, asset.id === 'R01' ? 0 : 1).machineId : undefined;
   return id ? state.machines[id] ?? null : null;
 }
 
@@ -71,7 +72,8 @@ export default function WorkshopApp() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const selected = useMemo(() => ASSETS.find(({ id }) => id === selectedId) ?? null, [selectedId]);
+  const selected = useMemo(() => selectedId === WORKPIECE_ASSET.id ? WORKPIECE_ASSET
+    : ASSETS.find(({ id }) => id === selectedId) ?? null, [selectedId]);
   const selectedMachine = machineFor(selected, simulation);
   const filteredAssets = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -84,12 +86,27 @@ export default function WorkshopApp() {
     });
   }, [filter, query]);
   const faultCount = Object.values(simulation.machines).filter(({ status }) => status === "fault").length;
+  const carrierPose = processPose(simulation.elapsed);
+  const selectedPose = selected ? assetPose(selected, simulation.elapsed) : null;
+  const phaseNames = lang === 'zh'
+    ? { load: '装载', unload: '卸载', process: '加工', transport: '运输', return: '空载返程', delivered: '入库完成' }
+    : { load: 'Loading', unload: 'Unloading', process: 'Processing', transport: 'Transport', return: 'Empty return', delivered: 'Delivered' };
   const flowStages = lang === "zh"
     ? ["原料", "数控车削", "加工中心", "去毛刺", "清洗", "尺寸检验", "成品"]
     : ["Raw stock", "Turning", "Milling", "Deburr", "Wash", "Inspect", "Finished"];
 
-  const selectAsset = (asset: WorkshopAsset) => setSelectedId(asset.id);
-  const reset = () => { setSimulation(createSimulation()); setSelectedId("L01"); };
+  const selectAsset = (asset: WorkshopAsset) => { setSelectedId(asset.id); setView("focus"); };
+  const reset = () => { setSimulation(createSimulation()); setSelectedId("L01"); setView("orbit"); };
+  const nextStage = () => {
+    const stageIndex = (carrierPose.stageIndex + 1) % 7;
+    const nextStop = PROCESS_TIMELINE.find((phase) => phase.stageIndex === stageIndex && phase.kind === (stageIndex === 0 ? 'load' : 'unload'))!;
+    let target = Math.max(0, nextStop.start - 2) + Math.floor(simulation.elapsed / PROCESS_DURATION) * PROCESS_DURATION;
+    if (target <= simulation.elapsed) target += PROCESS_DURATION;
+    setSimulation((current) => {
+      const advanced = advanceSimulation({ ...current, paused: false, speed: 1 }, target - current.elapsed);
+      return { ...advanced, paused: current.paused, speed: current.speed };
+    });
+  };
   const injectFault = () => {
     if (!selected || !machineIds.has(selected.id)) return;
     setSimulation((current) => setMachineFault(current, selected.id, true));
@@ -171,7 +188,10 @@ export default function WorkshopApp() {
           </div>
         </div>
 
-        <div className="scene-canvas" data-testid="workshop-stage" data-ready={sceneReady} data-label-mode="world" data-view-mode={view}>
+        <div className="scene-canvas" data-testid="workshop-stage" data-ready={sceneReady} data-label-mode="flat-world"
+          data-view-mode={view} data-focus-target={view === "focus" && selectedPose ? selectedPose.position.join(",") : undefined}
+          data-carrier="AMR01" data-carrier-phase={carrierPose.phase} data-carrier-loaded={carrierPose.carrying}
+          data-carrier-position={carrierPose.position.map((value) => value.toFixed(2)).join(",")}>
           <WorkshopScene lang={lang} state={simulation} selectedId={selectedId} onSelect={selectAsset}
             showLabels={showLabels} showRoutes={showRoutes} view={viewPreset[view]} focusPosition={selected?.position} copy={T}
             onReady={() => setSceneReady(true)} />
@@ -180,13 +200,22 @@ export default function WorkshopApp() {
             <span>{T.north}</span><i /><small>E</small>
           </div>
           <div className="floor-tag"><span>01</span>{lang === "zh" ? "数控加工单元" : "CNC PRODUCTION UNIT"}</div>
+          <div className="workpiece-controls">
+            <strong>{lang === 'zh' ? '工件 P-001' : 'Part P-001'}</strong>
+            <span>{flowStages[carrierPose.stageIndex]} · {phaseNames[carrierPose.phase]}</span>
+            <button onClick={() => selectAsset(WORKPIECE_ASSET)}>{lang === 'zh' ? '跟随工件' : 'Follow part'}</button>
+            <button onClick={nextStage}>{lang === 'zh' ? '下一工序' : 'Next operation'}</button>
+          </div>
           <div className="scene-scale">{T.floorSize}<b>48 × 30 m</b></div>
         </div>
 
         <div className="scene-footer">
           <div className="process-flow" data-testid="process-flow" aria-label={T.materialFlow}>
             <span className="legend-label">{T.materialFlow}</span>
-            <div>{flowStages.map((stage, index) => <span key={stage} className="process-step">
+            <span className="carrier-status" data-testid="carrier-stage">
+              {`AMR01 · ${phaseNames[carrierPose.phase]} → ${flowStages[carrierPose.stageIndex]}`}
+            </span>
+            <div>{flowStages.map((stage, index) => <span key={stage} className={`process-step${carrierPose.stageIndex === index ? ' active-step' : ''}`}>
               <i>{String(index + 1).padStart(2, "0")}</i>{stage}</span>)}</div>
           </div>
           <div className="scene-attribution">{T.secondary}</div>
@@ -203,12 +232,13 @@ export default function WorkshopApp() {
           <h3>{selected.name[lang]}</h3>
           <dl className="inspector-data">
             <div><dt>{T.condition}</dt><dd data-testid="machine-state" data-status={selectedMachine?.status ?? "idle"}>
-              <i className={`state-dot ${statusClass[selectedMachine?.status ?? "idle"]}`} />{statusName(selectedMachine?.status, T)}</dd></div>
+              <i className={`state-dot ${statusClass[selectedMachine?.status ?? "idle"]}`} />
+              {selected.kind === 'workpiece' ? `${flowStages[carrierPose.stageIndex]} · ${phaseNames[carrierPose.phase]}` : statusName(selectedMachine?.status, T)}</dd></div>
             <div><dt>{T.zone}</dt><dd>{zoneName(selected.zone, lang)}</dd></div>
             {selectedMachine && <div><dt>{T.cycles}</dt><dd>{selectedMachine.completedCycles.toString().padStart(3, "0")}</dd></div>}
-            {selected.kind === "amr" && <div><dt>{T.amr}</dt><dd>1.2 m/s · {lang === "zh" ? "巡回演示" : "Demo route"}</dd></div>}
-            {selected.kind === "robot" && <div><dt>{lang === "zh" ? "服务机床" : "Serves machine"}</dt><dd>{robotMachine[selected.id]}</dd></div>}
-            <div><dt>{lang === "zh" ? "位置" : "Position"}</dt><dd>{selected.position[0].toFixed(1)}, {selected.position[1].toFixed(1)} m</dd></div>
+            {selected.kind === "amr" && <div><dt>{T.amr}</dt><dd>{selected.id === 'AMR01' ? '0.62 m/s' : '1.2 m/s'} · {lang === "zh" ? "演示路线" : "Demo route"}</dd></div>}
+            {selected.kind === "robot" && <div><dt>{lang === "zh" ? "服务机床" : "Serves machines"}</dt><dd>{robotServiceCell[selected.id]}</dd></div>}
+            <div><dt>{lang === "zh" ? "位置" : "Position"}</dt><dd>{selectedPose!.position[0].toFixed(1)}, {selectedPose!.position[1].toFixed(1)} m</dd></div>
           </dl>
           {machineIds.has(selected.id) && <div className="machine-actions">
             {selectedMachine?.status === "fault"
