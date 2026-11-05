@@ -10,8 +10,10 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 import sys
 import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +30,8 @@ from domain_factory.engine import FactoryEngine  # noqa: E402
 from domain_factory.copilot import SUGGESTED_QUESTIONS, ask, render_nl  # noqa: E402
 from domain_factory.explanation import explain_live, explain_scenario  # noqa: E402
 from domain_factory.maintenance import assess  # noqa: E402
+from domain_factory.workorders import FAULT_TYPES, WorkOrderStore  # noqa: E402
+from domain_factory.workorder_comparison import compare_repair_times  # noqa: E402
 from domain_factory.serialize import amr_patch_message, snapshot_message  # noqa: E402
 from domain_factory.vision import VisionInspector, render_part_image, to_png  # noqa: E402
 from domain_factory.whatif import run_energy_scenario, run_scenario, validate_whatif  # noqa: E402
@@ -41,11 +45,15 @@ SPEED = {"value": 1.0, "paused": False, "seq": 0}
 RESET = {"active": False}                # §49：Reset 重建中（ticker 凍結舊 run）
 AMR_PREV: dict[str, dict] = {}           # §50：amr_patch 上次送出的欄位（run_id → amr_id → fields）
 SUPERSEDED: set[str] = set()             # 已被 Reset 取代的 run_id（查詢回 410，不是 404）
+WORK_ORDER_SESSION = uuid.uuid4().hex     # Distinguish runs across backend restarts.
+WORK_ORDER_STORE: WorkOrderStore | None = None
 _clients: set[WebSocket] = set()
 _lock = asyncio.Lock()
 
 @asynccontextmanager
 async def lifespan(app):
+    global WORK_ORDER_SESSION
+    WORK_ORDER_SESSION = uuid.uuid4().hex
     eng = FactoryEngine(run_id="LIVE-001", seed=42)
     eng.preroll()
     RUNS["LIVE-001"] = eng
@@ -63,6 +71,27 @@ app.add_middleware(GuardMiddleware)      # §50：rate limit／Origin／body 上
 log = logging.getLogger("twin")
 STALL_S = float(os.environ.get("TWIN_HEALTH_STALL_S", "10"))
 HEALTH = {"last_progress": time.monotonic(), "loop_errors": 0, "last_error": None}
+
+
+def _work_order_store() -> WorkOrderStore:
+    global WORK_ORDER_STORE
+    if WORK_ORDER_STORE is None:
+        path = Path(os.environ.get("TWIN_WORKORDERS_DB", str(ROOT / ".data" / "workorders.sqlite3")))
+        WORK_ORDER_STORE = WorkOrderStore(path)
+    return WORK_ORDER_STORE
+
+
+def _record_work_orders(events: list[dict]) -> None:
+    """Persist fault events without interrupting the authoritative simulator."""
+    selected = [ev for ev in events if ev.get("event_type") in FAULT_TYPES]
+    if not selected:
+        return
+    try:
+        store = _work_order_store()
+        for event in selected:
+            store.ingest(WORK_ORDER_SESSION, event)
+    except (OSError, ValueError, KeyError, sqlite3.Error):
+        log.exception("Unable to save simulated maintenance work order")
 
 
 
@@ -190,6 +219,7 @@ async def _ticker() -> None:
                 for _ in range(max(1, round(1 * SPEED["value"]))):
                     eng.step()
                 new_events, _ = eng.bus.after(before)
+                _record_work_orders(new_events)
                 payloads = [json.dumps(_wrap_event(eng, ev)) for ev in new_events]
                 # §50：AMR 位置 10 Hz 增量（只帶變動欄位，~300 B）；snapshot 仍每 1 s 一份
                 pm = amr_patch_message(eng, AMR_PREV.setdefault(eng.run_id, {}))
@@ -398,6 +428,7 @@ async def inject_failure(payload: dict) -> dict:
             ev = eng.inject(payload["failure_type"], payload["target_id"], dur,
                             extra={k: payload[k] for k in ("x", "z", "radius")
                                    if k in payload})
+            _record_work_orders([ev])
     except (KeyError, ValueError, TypeError) as ex:
         raise HTTPException(422, str(ex))
     return {"injected": True, "event": ev}
@@ -556,6 +587,7 @@ async def scenario_apply(scenario_id: str) -> dict:
     try:
         async with _lock:
             ev = eng.inject(inj["failure_type"], inj["target_id"], inj.get("duration_sec"))
+            _record_work_orders([ev])
     except (KeyError, ValueError) as ex:
         raise HTTPException(422, str(ex))
     eng.audit.record(sim_time=eng.clock.sim_time_iso, actor="operator",
@@ -626,6 +658,137 @@ async def maintenance() -> list[dict]:
     eng = _run("LIVE-001")
     async with _lock:
         return assess(eng)
+
+
+def _current_order(order_id: int, eng: FactoryEngine) -> dict:
+    try:
+        order = _work_order_store().get(order_id)
+    except KeyError:
+        raise HTTPException(404, "work order not found")
+    if order["session_id"] != WORK_ORDER_SESSION or order["run_id"] != eng.run_id:
+        raise HTTPException(409, "work order belongs to a previous simulation run")
+    if not _latest_incident(order, eng):
+        raise HTTPException(409, "work order no longer identifies the latest fault for this device")
+    return order
+
+
+def _latest_incident(order: dict, eng: FactoryEngine) -> bool:
+    for event in reversed(eng.bus.recent(eng.bus.retention)):
+        if event["source_id"] == order["source_id"] and event["event_type"] in FAULT_TYPES:
+            return event["seq"] == order["event_seq"]
+    # An evicted incident cannot safely authorize changes to a current device.
+    return False
+
+
+def _fault_active(order: dict, eng: FactoryEngine) -> bool:
+    if (order["session_id"] != WORK_ORDER_SESSION or order["run_id"] != eng.run_id
+            or not _latest_incident(order, eng)):
+        return False
+    target, kind = order["source_id"], order["failure_type"]
+    if kind == "conveyor_jam":
+        return eng.conv_state.get(target, {}).get("status") == "JAMMED"
+    if kind == "tool_failure":
+        return any(s["robot_id"] == target and s["fault_kind"] == "tool_failure"
+                   for cell in eng.cells.values() for s in cell["stations"])
+    if kind == "amr_fault":
+        return any(a["amr_id"] == target and a["task_state"] == "ERROR" for a in eng.amrs)
+    if kind == "compressor_fault":
+        return eng.compressor_fault_until > eng.clock.tick
+    return False
+
+
+def _public_order(order: dict, eng: FactoryEngine) -> dict:
+    return {**order,
+            "current_run": order["session_id"] == WORK_ORDER_SESSION and order["run_id"] == eng.run_id,
+            "fault_active": _fault_active(order, eng)}
+
+
+@app.get("/api/work-orders")
+async def list_work_orders() -> dict:
+    async with _lock:
+        eng = _run("LIVE-001")
+        store = _work_order_store()
+        rows = store.list(WORK_ORDER_SESSION, eng.run_id, include_history=True)
+        return {"session_id": WORK_ORDER_SESSION, "run_id": eng.run_id,
+                "orders": [_public_order(row, eng) for row in rows],
+                "summary": store.summarize(rows), "is_simulation_result": True}
+
+
+@app.post("/api/work-orders/{order_id}/start")
+async def start_work_order(order_id: int, payload: dict) -> dict:
+    assignee = payload.get("assignee")
+    if not isinstance(assignee, str) or not (1 <= len(assignee.strip()) <= 100):
+        raise HTTPException(422, "assignee must contain 1–100 characters")
+    async with _lock:
+        eng = _run("LIVE-001")
+        _current_order(order_id, eng)
+        try:
+            order = _work_order_store().start(order_id, assignee, eng.clock.tick, eng.clock.sim_time_iso)
+        except ValueError as ex:
+            raise HTTPException(409, str(ex))
+        return {"order": _public_order(order, eng)}
+
+
+def _apply_simulated_repair(order: dict, eng: FactoryEngine) -> str:
+    if not _fault_active(order, eng):
+        return "already_clear"
+    if order["failure_type"] == "conveyor_jam":
+        eng.repair_conveyor(order["source_id"])
+        return "restored"
+    if order["failure_type"] == "tool_failure":
+        station = next(s for cell in eng.cells.values() for s in cell["stations"]
+                       if s["robot_id"] == order["source_id"] and s["fault_kind"] == "tool_failure")
+        station["fault_until"] = eng.clock.tick
+        eng._repair_faults()  # Original path preserves held/rework part accounting.
+        return "waiting_for_auto_recovery" if station["fault_kind"] else "restored"
+    # Other simulated faults retain their original engine-controlled recovery time.
+    return "waiting_for_auto_recovery"
+
+
+@app.post("/api/work-orders/{order_id}/complete")
+async def complete_work_order(order_id: int, payload: dict) -> dict:
+    note = payload.get("note", "")
+    if not isinstance(note, str) or len(note) > 1000:
+        raise HTTPException(422, "note must be at most 1000 characters")
+    async with _lock:
+        eng = _run("LIVE-001")
+        order = _current_order(order_id, eng)
+        if order["status"] != "IN_PROGRESS":
+            raise HTTPException(409, "work order must be IN_PROGRESS")
+        before = eng.dump_state()
+        try:
+            recovery = _apply_simulated_repair(order, eng)
+            completed = _work_order_store().complete(
+                order_id, note, eng.clock.tick, eng.clock.sim_time_iso, tick_seconds=eng.clock.dt)
+        except Exception:
+            eng.load_state(before)
+            raise
+        return {"order": _public_order(completed, eng), "recovery": recovery}
+
+
+@app.post("/api/work-orders/{order_id}/compare")
+async def compare_work_order(order_id: int, payload: dict) -> dict:
+    try:
+        a, horizon = validate_whatif(payload.get("duration_a_sec"), payload.get("horizon_min", 5))
+        b, _ = validate_whatif(payload.get("duration_b_sec"), horizon)
+        if a is None or b is None:
+            raise ValueError("both remaining repair durations are required")
+    except (ValueError, TypeError, AttributeError) as ex:
+        raise HTTPException(422, str(ex))
+    _whatif_acquire()
+    try:
+        async with _lock:
+            eng = _run("LIVE-001")
+            order = _current_order(order_id, eng)
+            if not _fault_active(order, eng):
+                raise HTTPException(409, "the simulated fault has already cleared")
+            state, params = eng.dump_state(), eng.params
+        return await asyncio.to_thread(compare_repair_times, state=state, params=params, order=order,
+                                       duration_a_sec=a, duration_b_sec=b, horizon_min=horizon)
+    except ValueError as ex:
+        raise HTTPException(422, str(ex))
+    finally:
+        WHATIF["busy"] = False
 
 
 @app.get("/api/flow/history")

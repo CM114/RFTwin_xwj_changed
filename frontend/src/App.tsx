@@ -3,6 +3,7 @@ import { start, useTwin } from "./state/store";
 import { FactoryScene } from "./scene/FactoryScene";
 import { ConnBanner, Dashboard, Header, LeftPanel, Provenance, RightPanel } from "./panels/Panels";
 import { EnergyView, FlowView, HealthView, QualityView, SimulationView } from "./panels/Views";
+import { WorkOrdersView } from "./panels/WorkOrdersView";
 import { useT, type TKey } from "./i18n";
 import { ViewErrorBoundary } from "./panels/ErrorBoundary";
 
@@ -54,6 +55,7 @@ export default function App() {
                 {view === "quality" && <QualityView />}
                 {view === "energy" && <EnergyView />}
                 {view === "simulation" && <SimulationView />}
+                {view === "workorders" && <WorkOrdersView />}
               </div>
             )}
           </ViewErrorBoundary>

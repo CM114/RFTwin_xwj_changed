@@ -3,6 +3,19 @@
 - TWIN_WS_SEND_TIMEOUT_S=0：Starlette TestClient 的記憶體 WebSocket 不容許在 send 外包 cancel
   scope（訊息會遺失）；慢連線逾時在真 uvicorn 下由 Live e2e 覆蓋（§53）。"""
 import os
+import pytest
 
 os.environ.setdefault("TWIN_RATE_LIMIT", "0")
 os.environ.setdefault("TWIN_WS_SEND_TIMEOUT_S", "0")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolate_workorder_storage(tmp_path_factory):
+    """Test-created incidents must never appear in the user's live database."""
+    previous = os.environ.get("TWIN_WORKORDERS_DB")
+    os.environ["TWIN_WORKORDERS_DB"] = str(tmp_path_factory.mktemp("workorders") / "test.sqlite3")
+    yield
+    if previous is None:
+        os.environ.pop("TWIN_WORKORDERS_DB", None)
+    else:
+        os.environ["TWIN_WORKORDERS_DB"] = previous

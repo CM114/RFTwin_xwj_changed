@@ -1,5 +1,17 @@
 # RFTwin · Robot Factory Digital Twin
 
+## Maintenance work orders · 本仓库新增功能
+
+This fork adds a **simulated** fault-to-maintenance workflow: qualifying fault
+events create persistent work orders, technicians can start and complete them,
+and two remaining repair durations can be compared on isolated simulation
+branches. The existing 3D factory and upstream functionality remain in place.
+
+For Chinese setup instructions, supported recovery behavior, data storage and
+the scope of the added work, see [维修工单操作说明](docs/MAINTENANCE_ZH.md).
+This fork retains the upstream [MIT license](LICENSE) and attribution to
+[WayneChou-bot/RFTwin](https://github.com/WayneChou-bot/RFTwin).
+
 **A browser-native digital twin of a robotic production line — backend-authoritative, deterministic, explainable.**
 Four process cells, 12 robot arms and an AMR fleet run in a Python simulation engine; the 3D factory in the browser only
 renders. Same seed, same result — so every KPI, dispatch and detour can be traced to its cause.

@@ -8,7 +8,7 @@ import type { EventMessage, SnapshotMessage, TwinEvent } from "../types";
 import { demoLoaded, loadDemo, resetDemo, startDemo, stopDemo } from "./demo";
 
 export type RenderMode = "high" | "balanced" | "performance";
-export type ViewKey = "3d" | "flow" | "health" | "quality" | "energy" | "simulation";
+export type ViewKey = "3d" | "flow" | "health" | "quality" | "energy" | "simulation" | "workorders";
 export type ConnMode = "CONNECTING" | "LIVE" | "RECONNECTING" | "STALE"
   | "LOCAL_DEMO" | "SCHEMA_MISMATCH" | "ERROR";
 

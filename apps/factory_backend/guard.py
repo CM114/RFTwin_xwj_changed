@@ -29,11 +29,13 @@ BUCKET_BY_PATH: list[tuple[str, str]] = [
     ("/api/scenarios", "whatif"), ("/api/energy/whatif", "whatif"),
     ("/api/copilot", "ai"), ("/api/vision", "ai"),
     ("/api/simulation", "mutate"), ("/api/failures", "mutate"), ("/api/safety", "mutate"),
-    ("/api/alerts", "mutate"),
+    ("/api/alerts", "mutate"), ("/api/work-orders", "mutate"),
 ]
 
 
 def bucket_for(path: str) -> str | None:
+    if path.startswith("/api/work-orders/") and path.endswith("/compare"):
+        return "whatif"
     for prefix, b in BUCKET_BY_PATH:
         if path.startswith(prefix):
             return b

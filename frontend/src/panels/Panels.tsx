@@ -472,7 +472,7 @@ export function Header() {
       </div>
       <div className="hrow">
         <nav className="tabs" role="tablist" aria-label={T("hdr.views")}>
-          {(["3d", "flow", "health", "quality", "energy", "simulation"] as const)
+          {(["3d", "flow", "health", "quality", "energy", "simulation", "workorders"] as const)
             .map((k) => (
               <button key={k} type="button" role="tab" aria-selected={view === k}
                 className={`tab ${view === k ? "on" : ""}`}

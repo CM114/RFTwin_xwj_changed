@@ -305,16 +305,23 @@ class FactoryEngine:
                 self.check_conservation()
 
     # ------------------------------------------------------------ conveyors
+    def repair_conveyor(self, cid: str) -> bool:
+        """Clear one simulated jam through the same path as timed recovery."""
+        cs = self.conv_state[cid]
+        if cs["status"] != "JAMMED":
+            return False
+        cs["status"], cs["full_emitted"] = "RUNNING", False
+        self._emit("CONVEYOR", cid, "CONVEYOR_REPAIRED", "INFO", f"{cid} jam cleared")
+        self._resolve_alert(cid)
+        self._audit_transition(cid, "JAMMED", "RUNNING", "jam cleared")
+        return True
+
     def _conveyors_advance(self, dt: float) -> None:
         for i, cid in enumerate(CONVEYORS):
             cs = self.conv_state[cid]
             if cs["status"] == "JAMMED":
                 if self.clock.tick >= cs["jam_until"]:
-                    cs["status"], cs["full_emitted"] = "RUNNING", False
-                    self._emit("CONVEYOR", cid, "CONVEYOR_REPAIRED", "INFO",
-                               f"{cid} jam cleared")
-                    self._resolve_alert(cid)
-                    self._audit_transition(cid, "JAMMED", "RUNNING", "jam cleared")
+                    self.repair_conveyor(cid)
                 else:
                     continue                       # 卡住：在途件不前進、不卸載
             items = self.conveyors[cid]

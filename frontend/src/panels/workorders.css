@@ -1,0 +1,57 @@
+.tabs { min-width: 0; overflow-x: auto; }
+.tabs .tab { flex: 0 0 auto; white-space: nowrap; }
+
+.workorders { padding: 12px; color: var(--ink-2); font-size: 12px; }
+.workorders p { margin: 8px 0; }
+.workorders button, .workorders input, .workorders textarea { font: inherit; }
+.workorders button {
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  color: var(--ink); padding: 6px 9px; cursor: pointer;
+}
+.workorders button:hover:not(:disabled) { border-color: var(--blue); }
+.workorders button:disabled { opacity: .48; cursor: not-allowed; }
+.wo-topline { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.wo-topline button { white-space: nowrap; }
+.wo-live, .wo-offline { font-weight: 650; }
+.wo-live { color: var(--aqua); }
+.wo-offline { color: var(--warning); }
+.wo-explain, .wo-hint, .wo-session { color: var(--muted); }
+.wo-error {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  margin: 8px 0; padding: 8px; border: 1px solid var(--critical);
+  border-radius: 6px; color: #ffb3b3; overflow-wrap: anywhere;
+}
+.wo-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 10px 0; }
+.wo-summary > div { display: flex; flex-direction: column; gap: 3px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.wo-summary span { color: var(--muted); font-size: 11px; }
+.wo-summary b { color: var(--ink); font-size: 16px; font-variant-numeric: tabular-nums; }
+.wo-columns { display: grid; grid-template-columns: minmax(145px, 1fr) minmax(260px, 2fr); gap: 10px; align-items: start; }
+.wo-list { display: grid; gap: 5px; }
+.wo-list button { display: flex; flex-direction: column; gap: 3px; text-align: left; overflow-wrap: anywhere; }
+.wo-list button.selected { border-color: var(--blue); }
+.wo-list button span, .wo-list button small { color: var(--muted); }
+.wo-detail { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--panel); }
+.wo-detail h3 { margin: 0 0 8px; color: var(--ink); font-size: 13px; }
+.wo-detail dl { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 1.4fr); gap: 4px 10px; margin: 0; }
+.wo-detail dt { color: var(--muted); }
+.wo-detail dd { margin: 0; overflow-wrap: anywhere; }
+.wo-context { color: var(--blue); font-weight: 600; }
+.wo-actions, .wo-compare { display: grid; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.wo-actions label, .wo-inputs label { display: grid; gap: 3px; color: var(--muted); }
+.wo-actions input, .wo-actions textarea, .wo-inputs input {
+  width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--baseline);
+  border-radius: 5px; background: var(--panel-2); color: var(--ink);
+}
+.wo-actions textarea { resize: vertical; min-height: 48px; }
+.wo-actions button, .wo-compare > button { justify-self: start; }
+.wo-inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.wo-busy { color: var(--muted); }
+.wo-results { max-width: 100%; overflow-x: auto; }
+.wo-results table { width: 100%; border-collapse: collapse; text-align: left; font-variant-numeric: tabular-nums; }
+.wo-results th, .wo-results td { padding: 5px; border-bottom: 1px solid var(--line); }
+.wo-results th { color: var(--muted); font-weight: 600; }
+@media (max-width: 1250px) {
+  .wo-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wo-columns { grid-template-columns: 1fr; }
+  .wo-list { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+}
