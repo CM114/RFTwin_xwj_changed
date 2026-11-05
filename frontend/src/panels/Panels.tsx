@@ -437,7 +437,7 @@ export function Header() {
   return (
     <header>
       <div className="hrow">
-        <div className="title"><span className="brand">RFTwin</span><span className="sub"> · Robot Factory Digital Twin</span></div>
+        <div className="title"><span className="brand-mark" aria-hidden="true">▦</span><span className="brand">智维工坊</span><span className="origin">RFTwin · 工业运维中心</span></div>
         <ModeBadge />
         <span className="hmeta"><span>{T("hdr.sim")} <b>{snap?.sim_time.slice(11, 19) ?? "--:--:--"}</b></span></span>
         <span className="hmeta sync" title={T("hdr.seqTitle")}>

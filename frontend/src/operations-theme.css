@@ -1,0 +1,53 @@
+/* Industrial operations visual identity; the original 3D simulation remains intact. */
+:root {
+  --page: #07111e; --panel: #101e2d; --panel-2: #162a3b; --line: #294052;
+  --ink: #eef7fa; --ink-2: #c3d7df; --muted: #88a3b2; --baseline: #294454;
+  --blue: #39bdd1; --aqua: #45d7ac; --amber: #f4b04c;
+  --good: #4bd7a3; --warning: #f6c568; --serious: #ff9873; --critical: #ff687c;
+}
+body { background: #07111e; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; }
+.app { gap: 10px; padding: 10px; background: radial-gradient(ellipse at 50% -15%, #17384b 0%, #091725 42%, #07111e 100%); }
+header { padding: 10px 16px 6px; gap: 8px; border-radius: 14px;
+  background: linear-gradient(105deg, #173143 0%, #102434 48%, #101e2d 100%);
+  border: 1px solid #2d5263; box-shadow: 0 8px 28px #0004; }
+header .title { display: flex; align-items: center; gap: 9px; letter-spacing: .03em; }
+header .title .brand { color: #f0fcff; font-size: 17px; letter-spacing: .08em; }
+header .title .origin { color: #8eafbc; font-size: 10px; font-weight: 500; letter-spacing: .04em; }
+.brand-mark { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 9px;
+  color: #071b27; background: linear-gradient(145deg, #70e8d4, #35b6d1); font-size: 19px; box-shadow: 0 0 20px #35c5cf55; }
+.tabs { gap: 6px; margin-left: 0; overflow-x: auto; scrollbar-width: none; }
+.tab { padding: 6px 13px; border: 1px solid transparent; border-radius: 8px 8px 2px 2px; color: #9cb4c1; }
+.tab:hover { color: #e6ffff; background: #1b3948; }
+.tab.on { color: #7ce9e1; background: #1a4050; border-color: #327183; box-shadow: inset 0 -2px #65e3d4; }
+.live { color: #78edca; border-color: #33866f; background: #123c36; }
+.live.demo { background: #122f42; } .live.warn { background: #493615; } .live.dim { background: transparent; }
+.mid { gap: 10px; grid-template-columns: minmax(0, 1fr) clamp(280px, 21vw, 360px) clamp(230px, 17vw, 290px); }
+.mid > .panel:nth-child(1) { order: 3; }
+.mid > .panel:nth-child(2) { order: 1; }
+.mid > .panel:nth-child(3) { order: 2; }
+.panel, .tile, .kpibar { border-radius: 13px; border-color: #294658; background: linear-gradient(155deg, #142638, #101e2d 75%); box-shadow: 0 8px 24px #0003; }
+.panel > h2 { color: #9bc2ce; font-size: 11px; letter-spacing: .13em; border-bottom: 1px solid #243e4c; margin: 0 12px 8px; padding: 12px 0 9px; }
+.panel > h2::before { content: ""; display: inline-block; width: 3px; height: 11px; margin-right: 8px; border-radius: 4px; vertical-align: -1px; background: #54d9d0; }
+.center .c3d { border: 1px solid #315366; border-radius: 11px; background: #0b1824; }
+.cell { margin: 0 9px 8px; padding: 11px; background: linear-gradient(135deg, #1b3546, #162b3b); border-color: #315163; border-radius: 10px; }
+.cell .name { color: #e6f5f8; } .cell .kv { color: #9ab6c1; }
+.buf, .jl .bar { background: #274353; }
+.buf i, .jl .bar i { background: linear-gradient(90deg, #32a7c9, #67e2d0); }
+.simctl button, .modes button, .morebtn, .rtabs button { border-color: #325061; background: #193143; color: #a9c4ce; }
+.simctl button.on, .modes button.on, .rtabs button.on { border-color: #5ddbd2; color: #a8fff0; background: #1b4852; }
+.bottom { gap: 10px; } .tile { padding: 12px 14px; }
+.tile h3 { color: #99b9c5; font-size: 11px; } .hero { color: #f2fcff; letter-spacing: -.02em; }
+.bottom .tile:first-child { border-top: 2px solid #4fdab5; }
+.bottom .tile:nth-child(2) { border-top: 2px solid #45c6dc; }
+.bottom .tile:nth-child(3) { border-top: 2px solid #f0b85b; }
+.bottom .tile:nth-child(4) { border-top: 2px solid #75d4ae; }
+.rtabs { gap: 4px; } .det table td:first-child { color: #86a6b5; }
+.workorders { background: transparent; }
+.wo-summary > div, .wo-list button, .wo-detail { border-color: #315163; background: #142a3a; }
+.wo-list button.selected { border-color: #50d7ce; box-shadow: inset 3px 0 #50d7ce; }
+@media (max-width: 1439px) { header .title .origin { font-size: 9px; } header .title .brand { font-size: 14px; } }
+@media (max-width: 1099px) {
+  .app { gap: 8px; padding: 8px; }
+  .mid { grid-template-columns: 1fr; }
+  .center .c3d { min-height: 480px; }
+}

@@ -30,6 +30,7 @@ test("energy chart range switch survives a stale hover index (60→15, shift→6
   await chart.locator("button", { hasText: "1 hour" }).click();
   await expect(chart.locator("svg polyline")).toBeVisible();
   await expect(page.locator(".viewerr")).toHaveCount(0);
+  await expect(page.locator("header .title")).toContainText("智维工坊");
   await expect(page.locator("header .title")).toContainText("RFTwin");
   expect(errors).toEqual([]);
 });

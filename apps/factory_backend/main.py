@@ -660,24 +660,20 @@ async def maintenance() -> list[dict]:
         return assess(eng)
 
 
-def _current_order(order_id: int, eng: FactoryEngine) -> dict:
+def _current_order(order_id: int, eng: FactoryEngine, *, require_latest: bool = True) -> dict:
     try:
         order = _work_order_store().get(order_id)
     except KeyError:
         raise HTTPException(404, "work order not found")
     if order["session_id"] != WORK_ORDER_SESSION or order["run_id"] != eng.run_id:
         raise HTTPException(409, "work order belongs to a previous simulation run")
-    if not _latest_incident(order, eng):
+    if require_latest and not _latest_incident(order, eng):
         raise HTTPException(409, "work order no longer identifies the latest fault for this device")
     return order
 
 
 def _latest_incident(order: dict, eng: FactoryEngine) -> bool:
-    for event in reversed(eng.bus.recent(eng.bus.retention)):
-        if event["source_id"] == order["source_id"] and event["event_type"] in FAULT_TYPES:
-            return event["seq"] == order["event_seq"]
-    # An evicted incident cannot safely authorize changes to a current device.
-    return False
+    return _work_order_store().is_latest(order)
 
 
 def _fault_active(order: dict, eng: FactoryEngine) -> bool:
@@ -721,7 +717,7 @@ async def start_work_order(order_id: int, payload: dict) -> dict:
         raise HTTPException(422, "assignee must contain 1–100 characters")
     async with _lock:
         eng = _run("LIVE-001")
-        _current_order(order_id, eng)
+        _current_order(order_id, eng, require_latest=False)
         try:
             order = _work_order_store().start(order_id, assignee, eng.clock.tick, eng.clock.sim_time_iso)
         except ValueError as ex:
@@ -752,18 +748,25 @@ async def complete_work_order(order_id: int, payload: dict) -> dict:
         raise HTTPException(422, "note must be at most 1000 characters")
     async with _lock:
         eng = _run("LIVE-001")
-        order = _current_order(order_id, eng)
+        order = _current_order(order_id, eng, require_latest=False)
         if order["status"] != "IN_PROGRESS":
             raise HTTPException(409, "work order must be IN_PROGRESS")
         before = eng.dump_state()
+        before_seq = eng.bus.seq
         try:
-            recovery = _apply_simulated_repair(order, eng)
+            recovery = (_apply_simulated_repair(order, eng) if _latest_incident(order, eng)
+                        else "superseded")
             completed = _work_order_store().complete(
                 order_id, note, eng.clock.tick, eng.clock.sim_time_iso, tick_seconds=eng.clock.dt)
         except Exception:
             eng.load_state(before)
             raise
-        return {"order": _public_order(completed, eng), "recovery": recovery}
+        events, _ = eng.bus.after(before_seq)
+        payloads = [json.dumps(_wrap_event(eng, event)) for event in events]
+        result = {"order": _public_order(completed, eng), "recovery": recovery}
+    if payloads:
+        await _fanout(payloads)
+    return result
 
 
 @app.post("/api/work-orders/{order_id}/compare")

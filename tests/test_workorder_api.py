@@ -69,8 +69,9 @@ def test_stale_or_replaced_incident_cannot_repair_current_equipment(client):
     assert client.post("/api/failures/inject", json=payload).status_code == 200
     new = client.get("/api/work-orders").json()["orders"][0]
     assert old["id"] != new["id"]
-    rejected = client.post(f"/api/work-orders/{old['id']}/complete", json={"note": "stale"})
-    assert rejected.status_code == 409
+    rejected = client.post(f"/api/work-orders/{old['id']}/complete", json={"note": "superseded"})
+    assert rejected.status_code == 200
+    assert rejected.json()["recovery"] == "superseded"
     assert main._run("LIVE-001").conv_state["C-03"]["status"] == "JAMMED"
 
     previous = main.WORK_ORDER_SESSION
@@ -79,6 +80,17 @@ def test_stale_or_replaced_incident_cannot_repair_current_equipment(client):
         assert client.post(f"/api/work-orders/{new['id']}/start", json={"assignee": "维修员"}).status_code == 409
     finally:
         main.WORK_ORDER_SESSION = previous
+
+
+def test_active_fault_remains_actionable_after_event_buffer_eviction(client):
+    assert client.post("/api/failures/inject", json={
+        "failure_type": "conveyor_jam", "target_id": "C-03", "duration_sec": 120,
+    }).status_code == 200
+    order = client.get("/api/work-orders").json()["orders"][0]
+    main._run("LIVE-001").bus._buffer.clear()
+    assert client.get("/api/work-orders").json()["orders"][0]["fault_active"] is True
+    assert client.post(f"/api/work-orders/{order['id']}/start", json={"assignee": "维修员"}).status_code == 200
+    assert client.post(f"/api/work-orders/{order['id']}/complete", json={"note": "repaired"}).status_code == 200
 
 
 def test_robot_repair_uses_engine_recovery_and_preserves_parts(client):

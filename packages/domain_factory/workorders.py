@@ -107,6 +107,15 @@ class WorkOrderStore:
                 raise KeyError(f"work order {order_id} not found")
             return dict(row)
 
+    def is_latest(self, order: dict) -> bool:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT id FROM work_orders WHERE session_id=? AND run_id=? AND source_id=? "
+                "ORDER BY event_seq DESC, id DESC LIMIT 1",
+                (order["session_id"], order["run_id"], order["source_id"]),
+            ).fetchone()
+            return row is not None and row["id"] == order["id"]
+
     def start(self, order_id: int, assignee: str, sim_tick: int, sim_time: str) -> dict:
         if not isinstance(assignee, str) or not (1 <= len(assignee.strip()) <= 100):
             raise ValueError("assignee must contain 1–100 characters")
