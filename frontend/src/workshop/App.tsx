@@ -55,7 +55,7 @@ export default function WorkshopApp() {
   useEffect(() => {
     try { localStorage.setItem("workshop.lang", lang); } catch { /* browser storage is optional */ }
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
-    document.title = lang === "zh" ? "精密加工车间 | Shopfloor" : "Precision Machine Shop | Shopfloor";
+    document.title = lang === "zh" ? "机加工车间数字孪生与生产调度仿真系统" : "Precision Machine Shop | Shopfloor";
   }, [lang]);
 
   useEffect(() => {

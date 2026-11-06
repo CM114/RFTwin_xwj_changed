@@ -92,7 +92,7 @@ export default function ProductionApp() {
   }, [data]);
   useEffect(() => {
     document.documentElement.lang = en ? 'en' : 'zh-CN';
-    document.title = en ? 'Machining Production Twin' : '精密加工车间 · 生产流程与异常应对';
+    document.title = en ? 'Machining Production Twin' : '机加工车间数字孪生与生产调度仿真系统';
     try { localStorage.setItem('workshop.lang', lang); } catch { /* optional storage */ }
   }, [lang, en]);
   useEffect(() => {
@@ -127,7 +127,7 @@ export default function ProductionApp() {
 
   return <main className="production-app" data-testid="production-app" data-run-id={data?.run_id}>
     <header className="production-header">
-      <a className="shop-brand" href="/"><span className="shop-mark">S</span><span><strong>{en ? 'Machining Production Twin' : '精密加工车间'}</strong><small>{en ? 'ORDER FLOW / DISTURBANCE RESPONSE' : '订单流转 / 资源协同 / 异常应对'}</small></span></a>
+      <a className="shop-brand" href="/"><span className="shop-mark">S</span><span><strong>{en ? 'Machining Production Twin' : '机加工车间数字孪生与生产调度仿真系统'}</strong><small>{en ? 'ORDER FLOW / DISTURBANCE RESPONSE' : '订单流转 / 资源协同 / 异常应对'}</small></span></a>
       <nav><span className={`production-connection ${connected ? 'online' : ''}`} data-testid="production-connection" data-connected={connected}><i />{connected ? (en ? 'SIMULATION CONNECTED' : '仿真引擎已连接') : (en ? 'DISCONNECTED' : '仿真引擎未连接')}</span>
         <button onClick={() => setShowHistory(true)}>{en ? 'Production records' : '生产记录'}</button>
         <a className="mode-link" href="/workshop.html?mode=demo">{en ? 'Scene demo' : '场景演示'}</a>

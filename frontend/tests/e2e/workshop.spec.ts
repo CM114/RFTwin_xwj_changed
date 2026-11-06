@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 async function openWorkshop(page: import("@playwright/test").Page) {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/workshop.html?mode=demo");
-  await expect(page.locator(".shop-brand strong")).toHaveText("精密加工车间", { timeout: 10_000 });
+  await expect(page.locator(".shop-brand strong")).toHaveText("机加工车间数字孪生与生产调度仿真系统", { timeout: 10_000 });
   await expect(page.getByTestId("workshop-stage")).toHaveAttribute("data-ready", "true");
 }
 

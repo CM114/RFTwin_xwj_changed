@@ -2,7 +2,7 @@ import type { Lang } from "./model";
 
 export const copy = {
   zh: {
-    title: "精密加工车间", subtitle: "可视化生产仿真", demo: "仿真演示", live: "车间总览",
+    title: "机加工车间数字孪生与生产调度仿真系统", subtitle: "可视化生产仿真", demo: "仿真演示", live: "车间总览",
     machined: "加工设备", logistics: "工件流程", labels: "设备标签", faults: "异常事件",
     overview: "等轴视角", focus: "聚焦设备", top: "俯视平面", fit: "车间总览", search: "查找设备或区域",
     running: "运行中", setup: "准备中", idle: "待机", fault: "故障停机",
