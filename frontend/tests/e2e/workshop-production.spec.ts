@@ -94,4 +94,36 @@ test.describe('workshop production with real backend', () => {
     await expect.poll(async () => Math.abs(Number(await page.locator('canvas').getAttribute('data-focus-y')))).toBeLessThan(.01);
     await page.screenshot({ path: 'test-results/workshop-production-delivered.png', fullPage: true });
   });
+
+  test('a handoff fault releases the shared robot and healthy machines continue', async ({ page, context }) => {
+    await page.setViewportSize({ width: 1680, height: 1050 });
+    await context.request.post('/api/workshop/reset', { data: {} });
+    await page.goto('/workshop.html');
+    await expect(page.getByTestId('production-connection')).toHaveAttribute('data-connected', 'true');
+    let snapshot: any;
+    let robot: any;
+    for (let i = 0; i < 100; i++) {
+      const response = await context.request.post('/api/workshop/control', { data: { advance_seconds: 1 } });
+      expect(response.ok()).toBeTruthy();
+      snapshot = await response.json();
+      robot = snapshot.robots.find((r: any) => r.id === 'R01');
+      if (robot.status === 'loading' && snapshot.parts.some((p: any) => p.id === robot.part_id && p.location === 'R01')) break;
+    }
+    expect(robot.status).toBe('loading');
+    const machineId = robot.machine_id, partId = robot.part_id, faultTime = snapshot.elapsed;
+    await page.getByTestId('production-asset-select').selectOption(machineId);
+    await page.getByRole('button', { name: '注入故障', exact: true }).click();
+    await expect(page.getByTestId('production-machine-status')).toContainText('故障');
+    const response = await context.request.post('/api/workshop/control', { data: { advance_seconds: 60 } });
+    const after = await response.json();
+    expect(after.machines.find((m: any) => m.id === machineId).status).toBe('fault');
+    expect(after.robots.find((r: any) => r.id === 'R01').machine_id).not.toBe(machineId);
+    expect(after.parts.find((p: any) => p.id === partId).history.some((h: any) => h.event === 'handoff_recovered')).toBeTruthy();
+    expect(after.parts.some((p: any) => p.id !== partId && p.history.some((h: any) => h.time > faultTime && h.event === 'load_completed' && h.resource === 'R01'))).toBeTruthy();
+    await page.getByTestId(`production-part-${partId}`).click();
+    await expect(page.getByTestId('part-trace')).toContainText('机械臂已释放');
+    await page.getByRole('button', { name: '等轴视角', exact: true }).click();
+    await page.screenshot({ path: 'test-results/workshop-fault-recovered.png', fullPage: true });
+    await context.request.post('/api/workshop/reset', { data: {} });
+  });
 });

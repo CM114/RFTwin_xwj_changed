@@ -21,6 +21,8 @@ const labels: Record<string, [string, string]> = {
   setup_started: ['换型开始', 'Setup started'], processing_started: ['加工开始', 'Processing started'], operation_completed: ['工序完成', 'Operation completed'],
   load_started: ['机械臂上料', 'Robot loading'], load_completed: ['上料完成', 'Loading complete'], unload_started: ['机械臂下料', 'Robot unloading'], unload_completed: ['下料完成', 'Unloading complete'],
   reroute_requested: ['请求改派转运', 'Reroute requested'], policy_applied: ['派工策略更新', 'Policy updated'], restore: ['设备恢复', 'Machine restored'],
+  recovering: ['故障交接退回', 'Recovering handoff'], returning: ['空载归位', 'Returning empty'],
+  handoff_recovery_started: ['故障交接退回', 'Handoff recovery started'], handoff_recovered: ['机械臂已释放', 'Shared robot released'],
   shaft: ['阶梯轴 · 车削＋铣削', 'Stepped shaft · turn + mill'], sleeve: ['轴套 · 车削路线', 'Sleeve · turning route'],
 };
 const display = (value: string, en: boolean) => labels[value]?.[en ? 1 : 0] ?? value;
@@ -30,6 +32,10 @@ const reasonText = (value: string | null | undefined, en: boolean) => {
     'Awaiting AMR and turning input capacity': '等待搬运车及车削工位接收',
     'Awaiting AMR and downstream capacity': '等待搬运车及下游工位接收',
     'Robot handoff held by machine fault': '设备故障，上下料交接暂停',
+    'Machine fault: robot retracting to release shared resource': '机床故障，机械臂正在退回并释放共享资源',
+    'Awaiting machine repair or physical reroute': '工件已退回输入缓存，等待维修或改派转运',
+    'Awaiting machine repair before unloading': '工件留在机内，等待维修后下料',
+    'No compatible healthy machine available': '暂无兼容且正常的机床，等待设备恢复',
     'Awaiting machine / tending robot': '等待机床或上下料机械臂',
     'Downstream input queues full': '下游输入缓存已满',
     'Both AMRs busy': '两台搬运车均在执行任务',
@@ -157,7 +163,7 @@ export default function ProductionApp() {
         {machine && <div className="production-machine"><h3>{machine.id}<span data-testid="production-machine-status" className={machine.status}>{display(machine.status, en)}</span></h3><p>{en ? 'Current part' : '当前工件'} <b>{machine.part_id ?? '—'}</b></p><p>{en ? 'Input queue' : '等待队列'} <b>{machine.queue.join(', ') || '—'}</b></p><span className="production-progress"><i style={{ width: `${machine.progress * 100}%` }} /></span>
           {/^([LM]0[123])$/.test(machine.id) && <><label>{en ? 'Repair duration (s)' : '预计维修时长（秒）'}<input type="number" min={1} max={3600} value={duration} onChange={event => setDuration(Number(event.target.value))} /></label>
           <button className={machine.status === 'fault' ? 'production-primary' : 'production-danger'} disabled={disabled || !Number.isFinite(duration) || duration < 1 || duration > 3600} onClick={() => void mutate('fault', { machine_id: machine.id, duration_seconds: duration, active: machine.status !== 'fault' })}>{machine.status === 'fault' ? (en ? 'Restore machine' : '恢复设备') : (en ? 'Inject fault' : '注入故障')}</button>
-          <small>{en ? 'Loaded / processing parts stay on their machine.' : '已上机工件留在原设备，等待维修后继续。'}</small></>}</div>}
+          <small>{en ? 'Clamped work stays. Interrupted handling retracts and releases the shared robot.' : '已上机工件留在原设备；交接中断后机械臂退回，继续服务其他正常机床。'}</small></>}</div>}
         {!part && !machine && <div className="production-resource"><h3>{selectedId}</h3><p>{selected?.name[lang]}</p>{data?.amrs.filter(item => item.id === selectedId).map(item => <p key={item.id}>{item.from_id ?? '—'} → {item.to_id ?? '—'}<br />{display(item.status, en)} · {item.part_id ?? (en ? 'Empty' : '空载')}</p>)}</div>}
         <div className="production-section-title"><span><small>FLOW DIAGNOSIS</small><h2>{en ? 'Queues & bottlenecks' : '等待与瓶颈线索'}</h2></span></div>
         <div className="production-bottlenecks">{data?.bottlenecks.length ? data.bottlenecks.slice(0, 4).map((item, i) => <button key={`${item.resource}-${i}`} onClick={() => { if (ASSETS.some(asset => asset.id === item.resource)) { setSelectedId(item.resource); setView('focus'); } }}><strong>{item.resource}<b>{item.waiting_parts} {en ? 'waiting' : '件等待'}</b></strong><p>{reasonText(item.reason, en)}</p><small>{item.order_ids.join(' / ')}</small></button>) : <p>{en ? 'No queues currently detected' : '当前未检测到排队'}</p>}</div>

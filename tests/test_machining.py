@@ -197,8 +197,9 @@ def test_idle_carriers_park_clear_and_travel_empty_after_unloading():
     assert seen_return
 
 
-def test_fault_before_release_marks_orders_affected_and_waiting_time_counts_pickup():
+def test_fault_after_assignment_marks_orders_affected_and_waiting_time_counts_pickup():
     engine = MachiningEngine()
+    engine.advance(1)
     engine.set_fault('L01', 300, True)
     engine.advance(1)
     assert any(o['affected'] for o in engine.snapshot()['orders'])
@@ -206,3 +207,111 @@ def test_fault_before_release_marks_orders_affected_and_waiting_time_counts_pick
     before = engine.waiting_seconds
     engine.advance(.2)
     assert engine.waiting_seconds - before >= expected * .2 - 1e-6
+
+
+def handoff_engine(action, picked):
+    engine = MachiningEngine()
+    for _ in range(3000):
+        engine.advance(.2)
+        robot = engine.robots['R01']
+        if robot['action'] == action and (engine.parts[robot['part_id']]['location'] == 'R01') == picked:
+            return engine
+    pytest.fail(f'Could not reach {action} / picked={picked}')
+
+
+@pytest.mark.parametrize('action,picked', [('load', False), ('load', True), ('unload', False), ('unload', True)])
+def test_handoff_fault_releases_shared_robot_and_healthy_cell_keeps_working(action, picked):
+    engine = handoff_engine(action, picked)
+    robot = engine.robots['R01']
+    mid, pid = robot['machine_id'], robot['part_id']
+    fault_time = engine.elapsed
+    completed_before = sum(h['event'] == 'operation_completed' for h in engine.parts[pid]['history'])
+    engine.set_fault(mid, 600, True)
+    for _ in range(50):
+        before = engine.parts[pid]['position'][:]
+        engine.advance(.2)
+        engine.assert_invariants()
+        if robot['status'] == 'recovering' and picked:
+            assert math.dist(before, engine.parts[pid]['position']) <= .51
+    assert robot['machine_id'] != mid, 'A CNC production fault must not monopolize its shared robot'
+    machine = engine.machines[mid]
+    part = engine.parts[pid]
+    if action == 'load':
+        assert pid in machine['queue'] and machine['part_id'] is None
+        assert part['location'] == mid and part['status'] == 'queued'
+    elif picked:
+        assert sum(h['event'] == 'operation_completed' for h in part['history']) == completed_before + 1
+        assert machine['part_id'] is None
+    else:
+        assert machine['part_id'] == pid and machine['phase'] == 'done'
+        assert part['location'] == mid and part['status'] == 'awaiting_unload'
+    assert machine['status'] == 'fault'
+    assert any(h['event'] == 'handoff_recovered' for h in part['history'])
+    engine.advance(100)
+    assert any(h['time'] > fault_time and h['event'] == 'load_completed' and h['resource'] == 'R01'
+               for p in engine.parts.values() if p['id'] != pid for h in p['history'])
+    engine.set_fault(mid, 1, False)
+    engine.advance(2400)
+    engine.assert_invariants()
+    assert engine.complete
+
+
+def test_loading_reserves_capacity_for_fault_rollback():
+    engine = handoff_engine('load', True)
+    mid = engine.robots['R01']['machine_id']
+    machine = engine.machines[mid]
+    machine['incoming'] = ['P002']
+    assert not engine._capacity(machine), 'Keep an input slot reserved until the handoff finishes'
+
+
+def test_new_dispatches_bypass_faulted_machines_and_wait_if_all_are_unavailable():
+    engine = MachiningEngine()
+    engine.set_fault('L01', 600, True)
+    engine.advance(30)
+    assert not engine.machines['L01']['incoming'] and not engine.machines['L01']['queue']
+    assert all(a['to_id'] != 'L01' for a in engine.amrs.values())
+    engine = MachiningEngine()
+    for mid in ['L01', 'L02', 'L03']:
+        engine.set_fault(mid, 600, True)
+    engine.advance(10)
+    assert all(a['status'] == 'idle' for a in engine.amrs.values())
+    assert all(p['location'] == 'RAW' and p['waiting_reason'] == 'No compatible healthy machine available'
+               for p in engine.parts.values())
+
+
+def test_recovery_can_be_cloned_and_rerouted_without_mutating_live_state():
+    engine = handoff_engine('load', True)
+    mid = engine.robots['R01']['machine_id']
+    pid = engine.robots['R01']['part_id']
+    engine.set_fault(mid, 300, True)
+    engine.advance(.2)
+    assert engine.robots['R01']['status'] == 'recovering'
+    clone = MachiningEngine.from_state(json.loads(json.dumps(engine.dump_state())))
+    engine.advance(.2)
+    clone.advance(.2)
+    assert engine.dump_state() == clone.dump_state()
+    before = engine.state_hash()
+    assert len(compare_policies(engine, 1800)['scenarios']) == 3
+    assert engine.state_hash() == before
+    clone.set_policy('reroute')
+    clone.advance(120)
+    assert any(h['event'] == 'reroute_requested' for h in clone.parts[pid]['history'])
+
+
+@pytest.mark.parametrize('policy', ['reroute', 'edd'])
+def test_unload_recovery_reserves_output_before_rerouting_queued_parts(policy):
+    engine = MachiningEngine()
+    engine.advance(89)
+    robot = engine.robots['R01']
+    assert robot['action'] == 'unload' and engine.parts[robot['part_id']]['location'] == 'R01'
+    mid, pid = robot['machine_id'], robot['part_id']
+    assert len(engine.machines[mid]['queue']) == 2
+    engine.set_policy(policy)
+    engine.set_fault(mid, 60, True)
+    for _ in range(25):
+        engine.advance(.2)
+        engine.assert_invariants()
+    assert any(h['event'] == 'handoff_recovered' for h in engine.parts[pid]['history'])
+    engine.advance(1800)
+    engine.assert_invariants()
+    assert engine.complete

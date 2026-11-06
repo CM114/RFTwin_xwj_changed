@@ -233,14 +233,13 @@ export function WorkshopScene({
         const selected = selectedId === asset.id;
         const faulted = machine?.status === "fault";
         const active = !production || machine?.status === 'running';
-        const cutting = production ? !!production.parts.find(part => part.location === asset.id) : asset.id === PROCESS_STAGES[carrierPose.stageIndex].id && ['load', 'unload', 'process'].includes(carrierPose.phase);
         const onClick = () => onSelect(asset);
         return <group key={asset.id} position={[asset.position[0], 0, asset.position[1]]}>
           <group rotation-y={asset.kind === "lathe" ? Math.PI : 0}>
             {asset.kind === "lathe" ? <Lathe selected={selected} onSelect={onClick} faulted={faulted} active={active} elapsed={state.elapsed}
-              cutaway={(view === "focus" && selected) || cutting} /> :
+              cutaway /> :
               <Mill selected={selected} onSelect={onClick} faulted={faulted} active={active} elapsed={state.elapsed}
-                cutaway={(view === "focus" && selected) || cutting} />}
+                cutaway />}
           </group>
           {showLabels && <TagFromParent asset={asset} zone={zoneTitles[asset.zone] ?? ""} selected={selected}
             status={machine?.status ?? "idle"} onSelect={onClick} copy={copy} />}

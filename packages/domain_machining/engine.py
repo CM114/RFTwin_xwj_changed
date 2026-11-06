@@ -37,7 +37,7 @@ class MachiningEngine:
             duration=0., family=None, incoming=[], output=[]) for mid, op in OPERATIONS.items()}
         self.robots = {rid: dict(id=rid, position=[-12., .35, z], status='idle',
             machine_id=None, part_id=None, tip=None, utilization=0., busy_seconds=0.,
-            remaining=0., duration=0., start=[-12., .35, z], action=None)
+            remaining=0., duration=0., start=[-12., .35, z], action=None, recovery=None)
             for rid, z in [('R01', -4.8), ('R02', 4.8)]}
         self.amrs = {aid: dict(id=aid, position=pos, heading=0., status='idle', part_id=None,
             from_id=None, to_id=None, path=[], loaded=False, completed_trips=0, segments=[], parking=pos[:])
@@ -77,15 +77,13 @@ class MachiningEngine:
         return (due if self.policy == 'edd' else p['ready_at'], p['id'])
 
     def _capacity(self, machine):
-        return len(machine['queue']) + len(machine['incoming']) < QUEUE_CAPACITY
+        # Keep the input slot until loading commits, so fault rollback always fits.
+        loading = int(machine['phase'] == 'loading')
+        return len(machine['queue']) + len(machine['incoming']) + loading < QUEUE_CAPACITY
 
     def _choose(self, p):
         candidates = [m for m in self.machines.values() if m['operation'] == p['operation']
-                      and p['part_type'] in COMPATIBILITY[m['id']]]
-        if self.policy in ('reroute', 'edd'):
-            healthy = [m for m in candidates if m['fault_remaining'] <= 0]
-            if healthy:
-                candidates = healthy
+                      and p['part_type'] in COMPATIBILITY[m['id']] and not m['fault_remaining']]
         available = [m for m in candidates if self._capacity(m)]
         if not available:
             return None
@@ -201,43 +199,10 @@ class MachiningEngine:
             cells = ['L01', 'L02', 'L03'] if rid == 'R01' else ['M01', 'M02', 'M03']
             if r['status'] != 'idle':
                 m = self.machines[r['machine_id']]
-                if m['fault_remaining'] > 0:
-                    self.parts[r['part_id']]['waiting_reason'] = 'Robot handoff held by machine fault'
-                    continue
-                r['busy_seconds'] += dt
-                r['remaining'] = max(0., r['remaining'] - dt)
-                travel = abs(POSITIONS[m['id']][0] - r['start'][0]) / 3.
-                consumed = r['duration'] - r['remaining']
-                x = r['start'][0] + (POSITIONS[m['id']][0] - r['start'][0]) * min(1., consumed / max(travel, 1e-8))
-                r['position'][0] = x
-                p = self.parts[r['part_id']]
-                service_t = min(1., max(0., (consumed - travel) / 4.))
-                dock = self._dock(m['id'])
-                work = POSITIONS[m['id']]
-                rail = r['position']
-                if r['action'] == 'load':
-                    if service_t < .5:
-                        t = service_t * 2
-                        r['tip'] = [x, 1.3, rail[2] + (dock[2] - rail[2]) * t]
-                    else:
-                        t = (service_t - .5) * 2
-                        r['tip'] = [work[k] * t + dock[k] * (1 - t) for k in range(3)]
-                        p.update(position=r['tip'][:], location=rid)
+                if r['status'] == 'recovering' or m['fault_remaining'] > 0:
+                    self._recover_robot_handoff(r, m, dt)
                 else:
-                    if service_t < .5:
-                        t = service_t * 2
-                        r['tip'] = [x, 1.3, rail[2] + (work[2] - rail[2]) * t]
-                    else:
-                        t = (service_t - .5) * 2
-                        r['tip'] = [dock[k] * t + work[k] * (1 - t) for k in range(3)]
-                        p.update(position=r['tip'][:], location=rid)
-                if r['remaining'] < 1e-7:
-                    if r['action'] == 'load':
-                        self._start_setup(m)
-                    else:
-                        self._finish_operation(m)
-                    self._event(r['action'] + '_completed', rid, p['id'], f"{rid} completes {r['action']} at {m['id']}")
-                    r.update(status='idle', machine_id=None, part_id=None, tip=None, action=None)
+                    self._step_robot_handoff(r, m, dt)
             if r['status'] == 'idle':
                 ready = [self.machines[mid] for mid in cells if not self.machines[mid]['fault_remaining']]
                 unload = next((m for m in ready if m['phase'] == 'done' and len(m['output']) < QUEUE_CAPACITY), None)
@@ -256,6 +221,85 @@ class MachiningEngine:
                              duration=duration, remaining=duration, start=r['position'][:])
                     self.parts[pid].update(status=action + 'ing', waiting_reason=None)
                     self._event(action + '_started', rid, pid, f"{rid} {action}s {pid} at {m['id']}")
+
+    @staticmethod
+    def _release_robot(robot):
+        robot.update(status='idle', machine_id=None, part_id=None, tip=None, action=None,
+                     recovery=None, remaining=0., duration=0.)
+
+    def _recover_robot_handoff(self, r, m, dt):
+        """Recover from a CNC production fault; the independent tending robot still works."""
+        p = self.parts[r['part_id']]
+        if r['status'] != 'recovering':
+            carried = p['location'] == r['id']
+            start = (r['tip'] or [r['position'][0], 1.3, r['position'][2]])[:]
+            target = self._dock(m['id']) if carried else [r['position'][0], 1.3, r['position'][2]]
+            duration = max(.4, math.dist(start, target) / 2.5)
+            r.update(status='recovering', remaining=duration, duration=duration,
+                     recovery=dict(carried=carried, start=start, target=target))
+            p['waiting_reason'] = 'Machine fault: robot retracting to release shared resource'
+            self._event('handoff_recovery_started', r['id'], p['id'],
+                        f"{r['id']} recovers interrupted {r['action']} at {m['id']}")
+        r['busy_seconds'] += dt
+        r['remaining'] = max(0., r['remaining'] - dt)
+        recovery = r['recovery']
+        t = min(1., 1 - r['remaining'] / r['duration'])
+        r['tip'] = [recovery['start'][k] + (recovery['target'][k] - recovery['start'][k]) * t for k in range(3)]
+        if recovery['carried']:
+            p['position'] = r['tip'][:]
+        if r['remaining'] > 1e-7:
+            return
+        if r['action'] == 'load':
+            # No machining has started. Return it to the reserved input slot.
+            m['queue'].insert(0, p['id'])
+            m.update(part_id=None, phase='idle', progress=0., remaining=0.)
+            p.update(location=m['id'], position=self._dock(m['id']), status='queued',
+                     assigned_machine=m['id'], waiting_reason='Awaiting machine repair or physical reroute')
+        elif recovery['carried']:
+            # Processing finished before pickup; complete delivery into the output buffer.
+            self._finish_operation(m)
+        else:
+            # Still clamped: leave the completed part in the machine for later unloading.
+            m['phase'] = 'done'
+            p.update(status='awaiting_unload', waiting_reason='Awaiting machine repair before unloading')
+        m['status'] = self._machine_status(m)
+        self._event('handoff_recovered', r['id'], p['id'],
+                    f"{r['id']} released after recovery at {m['id']}")
+        self._release_robot(r)
+
+    def _step_robot_handoff(self, r, m, dt):
+        r['busy_seconds'] += dt
+        r['remaining'] = max(0., r['remaining'] - dt)
+        travel = abs(POSITIONS[m['id']][0] - r['start'][0]) / 3.
+        consumed = r['duration'] - r['remaining']
+        x = r['start'][0] + (POSITIONS[m['id']][0] - r['start'][0]) * min(1., consumed / max(travel, 1e-8))
+        r['position'][0] = x
+        p = self.parts[r['part_id']]
+        service_t = min(1., max(0., (consumed - travel) / 4.))
+        dock, work, rail = self._dock(m['id']), POSITIONS[m['id']], r['position']
+        if r['action'] == 'load':
+            if service_t < .5:
+                t = service_t * 2
+                r['tip'] = [x, 1.3, rail[2] + (dock[2] - rail[2]) * t]
+            else:
+                t = (service_t - .5) * 2
+                r['tip'] = [work[k] * t + dock[k] * (1 - t) for k in range(3)]
+                p.update(position=r['tip'][:], location=r['id'])
+        else:
+            if service_t < .5:
+                t = service_t * 2
+                r['tip'] = [x, 1.3, rail[2] + (work[2] - rail[2]) * t]
+            else:
+                t = (service_t - .5) * 2
+                r['tip'] = [dock[k] * t + work[k] * (1 - t) for k in range(3)]
+                p.update(position=r['tip'][:], location=r['id'])
+        if r['remaining'] < 1e-7:
+            if r['action'] == 'load':
+                self._start_setup(m)
+            else:
+                self._finish_operation(m)
+            self._event(r['action'] + '_completed', r['id'], p['id'], f"{r['id']} completes {r['action']} at {m['id']}")
+            self._release_robot(r)
 
     @staticmethod
     def _dock(mid):
@@ -365,12 +409,17 @@ class MachiningEngine:
             self._reroute_queued()
         waiting = sorted((p for p in self.parts.values() if p['status'] == 'waiting_transport'), key=self._priority)
         for p in waiting:
+            if p['target'] in self.machines and self.machines[p['target']]['fault_remaining']:
+                # Unassigned transport can be planned again; a moving AMR keeps its destination.
+                p.update(target=None, assigned_machine=None)
             if p['target'] is None:
                 p['target'] = 'FG' if p['operation'] == 'finished' else self._choose(p)
                 p['assigned_machine'] = p['target'] if p['target'] != 'FG' else None
             target = p['target']
             if not target:
-                p['waiting_reason'] = 'Downstream input queues full'
+                healthy = any(m['operation'] == p['operation'] and not m['fault_remaining']
+                              and p['part_type'] in COMPATIBILITY[m['id']] for m in self.machines.values())
+                p['waiting_reason'] = 'Downstream input queues full' if healthy else 'No compatible healthy machine available'
                 continue
             if target != 'FG' and not self._capacity(self.machines[target]):
                 p['waiting_reason'] = f'{target} input queue full'
@@ -430,7 +479,9 @@ class MachiningEngine:
             if p['status'] != 'queued':
                 continue
             m = self.machines[p['location']]
-            if not m['fault_remaining'] or len(m['output']) >= QUEUE_CAPACITY:
+            # A handoff already unloading owns its eventual output slot, including recovery.
+            reserved_output = int(m['phase'] == 'unloading')
+            if not m['fault_remaining'] or len(m['output']) + reserved_output >= QUEUE_CAPACITY:
                 continue
             alternatives = [x for x in self.machines.values() if x['operation'] == m['operation']
                             and not x['fault_remaining'] and self._capacity(x)
@@ -465,8 +516,8 @@ class MachiningEngine:
     def assert_invariants(self):
         claimed = []
         for m in self.machines.values():
-            assert len(m['queue']) + len(m['incoming']) <= QUEUE_CAPACITY
-            assert len(m['output']) <= QUEUE_CAPACITY
+            assert len(m['queue']) + len(m['incoming']) + int(m['phase'] == 'loading') <= QUEUE_CAPACITY
+            assert len(m['output']) + int(m['phase'] == 'unloading') <= QUEUE_CAPACITY
             assert len(set(m['queue'] + m['incoming'])) == len(m['queue'] + m['incoming'])
             claimed.extend(m['queue'])
             claimed.extend(m['output'])
@@ -512,10 +563,11 @@ class MachiningEngine:
                     metrics=metrics, bottlenecks=bottlenecks, events=events, assumptions=[
                         'Demonstration simulation only; no real telemetry, machine control or material-removal physics.',
                         'Shaft: turning → milling → deburr → wash → inspection. Sleeve skips milling.',
-                        'Input queues hold 2 parts including reserved inbound transfers; RAW and finished storage hold the finite order set.',
+                        'Input queues hold 2 parts including inbound and loading rollback reservations; unloading reserves an output slot. RAW/FG hold the finite order set.',
                         'Two exclusive rail robots each tend three CNCs; station transfers and fixtures are simplified.',
                         'RAW/FG and queue positions are discrete rack/pallet slots. Dock-to-rack transfer mechanisms are instantaneous; AMRs use the fixed station handoff, never drive into stored inventory.',
                         'Two AMRs reserve every 3 m aisle segment through pickup, delivery and empty return before departure; overlapping trips serialize. Idle carriers park in side bays. This is not certified collision planning.',
-                        'Family setup 8 s; CNC faults hold loaded work and handoffs. Only unstarted queued work can physically reroute.',
+                        'Family setup 8 s; CNC faults retain clamped work. Interrupted robot handoffs retract/return input or complete picked output, then release the shared robot. Only unstarted queued work can reroute.',
+                        'CNC production faults leave the independent robot and releasable fixtures operational; coupled safety stops or seized grippers are not modeled.',
                         'Projected finish is available when an order completes; compare policies for forward simulation estimates.',
                         'Due dates and all durations are simulated seconds; unfinished orders accrue observed tardiness only.'])
