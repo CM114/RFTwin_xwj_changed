@@ -19,3 +19,15 @@ def isolate_workorder_storage(tmp_path_factory):
         os.environ.pop("TWIN_WORKORDERS_DB", None)
     else:
         os.environ["TWIN_WORKORDERS_DB"] = previous
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolate_workshop_storage(tmp_path_factory):
+    """Every lifespan in the test suite uses a disposable machining database."""
+    previous = os.environ.get("TWIN_WORKSHOP_DB")
+    os.environ["TWIN_WORKSHOP_DB"] = str(tmp_path_factory.mktemp("workshop") / "test.sqlite3")
+    yield
+    if previous is None:
+        os.environ.pop("TWIN_WORKSHOP_DB", None)
+    else:
+        os.environ["TWIN_WORKSHOP_DB"] = previous

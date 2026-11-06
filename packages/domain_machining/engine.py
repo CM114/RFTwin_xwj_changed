@@ -10,13 +10,13 @@ import hashlib
 import json
 import math
 import uuid
-from functools import lru_cache
 
 from twin_runtime_core.clock import SimulationClock
 from twin_runtime_core.events import EventBus
 
 from .config import (COMPATIBILITY, DURATIONS, OPERATIONS, POSITIONS, QUEUE_CAPACITY,
                      ROUTES, SETUP_SECONDS, STAGES, WorkshopConfig)
+from .traffic import departure_delay, sample_path, separated
 
 
 class MachiningEngine:
@@ -40,8 +40,9 @@ class MachiningEngine:
             remaining=0., duration=0., start=[-12., .35, z], action=None, recovery=None)
             for rid, z in [('R01', -4.8), ('R02', 4.8)]}
         self.amrs = {aid: dict(id=aid, position=pos, heading=0., status='idle', part_id=None,
-            from_id=None, to_id=None, path=[], loaded=False, completed_trips=0, segments=[], parking=pos[:])
-            for aid, pos in [('AMR01', [-22.3, .35, -1.2]), ('AMR02', [22.3, .35, 1.2])]}
+            from_id=None, to_id=None, path=[], loaded=False, completed_trips=0, segments=[], parking=pos[:],
+            trajectory=[], traffic_delay=0)
+            for aid, pos in [('AMR01', [-24., .35, -1.2]), ('AMR02', [24., .35, 1.2])]}
         self.reservations = {}
         self.finished_at = {}
         for order in self.config.orders:
@@ -51,7 +52,8 @@ class MachiningEngine:
                     operation='turning', stage_index=0, status='waiting_transport', location='RAW',
                     position=self._dock('RAW'), waiting_reason='Awaiting AMR and turning input capacity',
                     history=[], assigned_machine=None, route_index=0, target=None,
-                    ready_at=0., completed_at=None, affected=False)
+                    ready_at=0., completed_at=None, affected=False, historically_affected=False,
+                    transfer=None, buffer_location='RAW', buffer_slot=len(self.parts), reserved_slot=None)
                 self._event('released', 'RAW', pid, f'{pid} released for {order.id}')
         self._place_static_parts()
 
@@ -123,21 +125,30 @@ class MachiningEngine:
                         m['phase'] = 'done'
                         self.parts[m['part_id']]['status'] = 'awaiting_unload'
                     elif len(m['output']) < QUEUE_CAPACITY:
-                        self._finish_operation(m)
+                        self._begin_station_handoff(m, 'unload')
                     else:
                         m['phase'] = 'done'
             if m['id'][0] not in 'LM' and m['phase'] == 'done' and len(m['output']) < QUEUE_CAPACITY:
-                self._finish_operation(m)
+                self._begin_station_handoff(m, 'unload')
+            if m['id'][0] not in 'LM' and m['phase'] in ('loading', 'unloading'):
+                p = self.parts[m['part_id']]
+                if self._move_transfer(p, dt):
+                    if m['phase'] == 'loading':
+                        p.update(buffer_location=None, buffer_slot=None)
+                        self._start_setup(m)
+                    else:
+                        self._finish_operation(m)
             if m['id'][0] not in 'LM' and m['phase'] == 'idle' and m['queue']:
                 pid = sorted(m['queue'], key=lambda pid: self._priority(self.parts[pid]))[0]
                 m['queue'].remove(pid)
                 m['part_id'] = pid
-                self._start_setup(m)
+                self._begin_station_handoff(m, 'load')
             m['status'] = self._machine_status(m)
         self._step_robots(dt)
         self._step_amrs(dt)
         self._dispatch()
         self._place_static_parts()
+        self._refresh_fault_impact()
         self.waiting_seconds += dt * sum(p['status'] in ('queued', 'waiting_transport', 'awaiting_unload', 'awaiting_pickup') for p in self.parts.values())
 
     @staticmethod
@@ -149,25 +160,59 @@ class MachiningEngine:
                 'unloading': 'blocked'}[machine['phase']]
 
     def _place_static_parts(self):
-        for location in ['RAW', 'FG']:
-            parts = [p for p in self.parts.values() if p['location'] == location]
-            for p in parts:
-                index = int(p['id'][1:]) - 1
-                column, row = index % 4, (index // 4) % 4
-                layer = index // 16
-                p['position'] = [(-21.35 if location == 'RAW' else 18.65) + column * .9,
-                                 .95 + layer * .45, -9.6 + row * 1.05]
-        for mid, m in self.machines.items():
-            for slot, pid in enumerate(m['queue'] + m['output']):
-                p = self.parts[pid]
-                if p['location'] == mid and p['status'] in ('queued', 'waiting_transport', 'awaiting_pickup'):
-                    pos = self._dock(mid)
-                    pos[0] += (-1.2 + slot * .8) if mid[0] in 'LM' else (-.9 + slot * .6)
-                    p['position'] = pos
+        # Initial inventory placement only. Every later change is a timed handoff;
+        # removing a neighbor never renumbers or moves a part's reserved slot.
+        if self.clock.tick == 0:
+            for p in self.parts.values():
+                p['position'] = self._buffer_position('RAW', p['buffer_slot'])
+
+    def _buffer_position(self, location, slot):
+        if location in ('RAW', 'FG'):
+            return [(-21.35 if location == 'RAW' else 18.65) + slot % 4 * .9,
+                    .95 + slot // 16 * .45, -9.6 + (slot // 4) % 4 * 1.05]
+        pos = self._dock(location)
+        pos[0] += (slot % 4 - 1.5) * .55
+        pos[1] += slot // 4 * .45
+        return pos
+
+    def _reserve_buffer_slot(self, location):
+        used = {p['buffer_slot'] for p in self.parts.values() if p.get('buffer_location') == location}
+        used.update(p['reserved_slot']['slot'] for p in self.parts.values()
+                    if p.get('reserved_slot') and p['reserved_slot']['location'] == location)
+        return next(slot for slot in range(len(self.parts) + 4) if slot not in used)
+
+    def _begin_transfer(self, p, kind, target, duration=None):
+        duration = duration or max(self.clock.dt, math.dist(p['position'], target) / 2.5)
+        p['transfer'] = dict(kind=kind, start=p['position'][:], target=target[:],
+                             duration=duration, remaining=duration)
+
+    @staticmethod
+    def _move_transfer(p, dt):
+        transfer = p['transfer']
+        transfer['remaining'] = max(0., transfer['remaining'] - dt)
+        t = min(1., 1 - transfer['remaining'] / transfer['duration'])
+        p['position'] = [x + (y - x) * t for x, y in zip(transfer['start'], transfer['target'])]
+        if transfer['remaining'] < 1e-7:
+            p['transfer'] = None
+            return True
+        return False
+
+    def _begin_station_handoff(self, m, action):
+        p = self.parts[m['part_id']]
+        if action == 'load':
+            target = POSITIONS[m['id']]
+        else:
+            slot = self._reserve_buffer_slot(m['id'])
+            p['reserved_slot'] = dict(location=m['id'], slot=slot)
+            target = self._buffer_position(m['id'], slot)
+        m['phase'] = 'loading' if action == 'load' else 'unloading'
+        p.update(status=m['phase'], stage_index=STAGES[m['operation']])
+        self._begin_transfer(p, 'station_' + action, target)
 
     def _start_setup(self, m):
         p = self.parts[m['part_id']]
         p.update(location=m['id'], position=POSITIONS[m['id']][:], waiting_reason=None)
+        p.update(stage_index=STAGES[m['operation']], buffer_location=None, buffer_slot=None, transfer=None)
         if m['family'] != p['part_type']:
             m.update(phase='setup', remaining=SETUP_SECONDS, duration=SETUP_SECONDS, family=p['part_type'])
             p['status'] = 'setup'
@@ -191,7 +236,8 @@ class MachiningEngine:
         p.update(operation=route[p['route_index']] if p['route_index'] < len(route) else 'finished',
                  status='waiting_transport', assigned_machine=None, target=None, ready_at=self.elapsed,
                  waiting_reason='Awaiting AMR and downstream capacity', location=m['id'],
-                 position=self._dock(m['id']))
+                 buffer_location=m['id'], buffer_slot=p['reserved_slot']['slot'] if p.get('reserved_slot') else p['buffer_slot'],
+                 reserved_slot=None, transfer=None)
         m.update(part_id=None, phase='idle', progress=0., remaining=0.)
 
     def _step_robots(self, dt):
@@ -219,6 +265,17 @@ class MachiningEngine:
                     m['phase'] = 'loading' if action == 'load' else 'unloading'
                     r.update(status=action + 'ing', action=action, machine_id=m['id'], part_id=pid,
                              duration=duration, remaining=duration, start=r['position'][:])
+                    p = self.parts[pid]
+                    if action == 'unload':
+                        p['reserved_slot'] = dict(location=m['id'], slot=self._reserve_buffer_slot(m['id']))
+                    r['pickup_position'] = p['position'][:]
+                    r['drop_position'] = (POSITIONS[m['id']][:] if action == 'load' else
+                                           self._buffer_position(m['id'], p['reserved_slot']['slot']))
+                    # Retain the four-second service minimum, and bound payload speed.
+                    service = max(4., 2 * math.dist(r['pickup_position'], r['drop_position']) / 2.5)
+                    r['service_duration'] = service
+                    r['duration'] = r['remaining'] = duration - 4. + service
+                    p['stage_index'] = STAGES[m['operation']]
                     self.parts[pid].update(status=action + 'ing', waiting_reason=None)
                     self._event(action + '_started', rid, pid, f"{rid} {action}s {pid} at {m['id']}")
 
@@ -233,7 +290,8 @@ class MachiningEngine:
         if r['status'] != 'recovering':
             carried = p['location'] == r['id']
             start = (r['tip'] or [r['position'][0], 1.3, r['position'][2]])[:]
-            target = self._dock(m['id']) if carried else [r['position'][0], 1.3, r['position'][2]]
+            target = (self._buffer_position(m['id'], p['buffer_slot']) if r['action'] == 'load'
+                      else r['drop_position']) if carried else [r['position'][0], 1.3, r['position'][2]]
             duration = max(.4, math.dist(start, target) / 2.5)
             r.update(status='recovering', remaining=duration, duration=duration,
                      recovery=dict(carried=carried, start=start, target=target))
@@ -253,7 +311,7 @@ class MachiningEngine:
             # No machining has started. Return it to the reserved input slot.
             m['queue'].insert(0, p['id'])
             m.update(part_id=None, phase='idle', progress=0., remaining=0.)
-            p.update(location=m['id'], position=self._dock(m['id']), status='queued',
+            p.update(location=m['id'], status='queued', transfer=None,
                      assigned_machine=m['id'], waiting_reason='Awaiting machine repair or physical reroute')
         elif recovery['carried']:
             # Processing finished before pickup; complete delivery into the output buffer.
@@ -261,6 +319,7 @@ class MachiningEngine:
         else:
             # Still clamped: leave the completed part in the machine for later unloading.
             m['phase'] = 'done'
+            p['reserved_slot'] = None
             p.update(status='awaiting_unload', waiting_reason='Awaiting machine repair before unloading')
         m['status'] = self._machine_status(m)
         self._event('handoff_recovered', r['id'], p['id'],
@@ -275,24 +334,16 @@ class MachiningEngine:
         x = r['start'][0] + (POSITIONS[m['id']][0] - r['start'][0]) * min(1., consumed / max(travel, 1e-8))
         r['position'][0] = x
         p = self.parts[r['part_id']]
-        service_t = min(1., max(0., (consumed - travel) / 4.))
-        dock, work, rail = self._dock(m['id']), POSITIONS[m['id']], r['position']
-        if r['action'] == 'load':
-            if service_t < .5:
-                t = service_t * 2
-                r['tip'] = [x, 1.3, rail[2] + (dock[2] - rail[2]) * t]
-            else:
-                t = (service_t - .5) * 2
-                r['tip'] = [work[k] * t + dock[k] * (1 - t) for k in range(3)]
-                p.update(position=r['tip'][:], location=r['id'])
+        service_t = min(1., max(0., (consumed - travel) / r.get('service_duration', 4.)))
+        rail = r['position']
+        if service_t < .5:
+            t = service_t * 2
+            start = [x, 1.3, rail[2]]
+            r['tip'] = [start[k] + (r['pickup_position'][k] - start[k]) * t for k in range(3)]
         else:
-            if service_t < .5:
-                t = service_t * 2
-                r['tip'] = [x, 1.3, rail[2] + (work[2] - rail[2]) * t]
-            else:
-                t = (service_t - .5) * 2
-                r['tip'] = [dock[k] * t + work[k] * (1 - t) for k in range(3)]
-                p.update(position=r['tip'][:], location=r['id'])
+            t = (service_t - .5) * 2
+            r['tip'] = [r['drop_position'][k] * t + r['pickup_position'][k] * (1 - t) for k in range(3)]
+            p.update(position=r['tip'][:], location=r['id'])
         if r['remaining'] < 1e-7:
             if r['action'] == 'load':
                 self._start_setup(m)
@@ -331,69 +382,79 @@ class MachiningEngine:
             current = point
         return out
 
-    @staticmethod
-    def _segment(a, b):
-        # Conservative 3 m aisle cells and full station spurs; one carrier per segment.
-        x = (a[0] + b[0]) / 2
-        z = (a[2] + b[2]) / 2
-        if abs(z) <= 1.7:
-            return f'aisle:{math.floor(x / 3)}'
-        return f'spur:{round(x)}:{1 if z > 0 else -1}'
-
-    @staticmethod
-    @lru_cache(maxsize=2048)
-    def _transfer_plan(start, pickup_dock, delivery_dock, parking):
-        """Cache immutable geometry only; each run keeps its own mutable path/reservations."""
-        pickup = MachiningEngine._path(start, pickup_dock)
-        delivery = MachiningEngine._path(pickup_dock, delivery_dock)
-        returning = MachiningEngine._path(delivery_dock, parking)
-        points = [start] + pickup + delivery + returning
-        segments = tuple(sorted({MachiningEngine._segment(points[i], points[i + 1])
-                                 for i in range(len(points) - 1)}))
-        return tuple(tuple(point) for point in pickup), segments
+    def _carrier_trajectory(self, a, p, target, slot):
+        trajectory = []
+        current = a['position'][:]
+        handoffs = {}
+        for mode, destination in [('pickup', p['location']), ('transport', target), ('returning', None)]:
+            end = self._dock(destination) if destination else a['parking'][:]
+            end[1] = .35
+            points = sample_path(current, self._path(current, end), 3. * self.clock.dt)
+            trajectory.extend(dict(position=point, mode=mode) for point in points)
+            current = end[:]
+            if mode == 'returning':
+                continue
+            cargo = [end[0], .9, end[2]]
+            start = p['position'] if mode == 'pickup' else cargo
+            finish = cargo if mode == 'pickup' else self._buffer_position(target, slot)
+            count = max(1, math.ceil(math.dist(start, finish) / (2.5 * self.clock.dt)))
+            phase = 'pickup_transfer' if mode == 'pickup' else 'delivery_transfer'
+            trajectory.extend(dict(position=current[:], mode=phase) for _ in range(count))
+            handoffs[phase] = dict(target=finish, duration=count * self.clock.dt)
+        return trajectory, handoffs
 
     def _step_amrs(self, dt):
+        for a in self.amrs.values():
+            a['previous_position'] = a['position'][:]
         for aid, a in self.amrs.items():
             if a['status'] == 'idle':
                 continue
-            distance = 3. * dt
-            while distance > 1e-8 and a['path']:
-                point = a['path'][0]
-                length = math.dist(a['position'], point)
-                step = min(1., distance / max(length, 1e-9))
-                proposed = [a['position'][k] + (point[k] - a['position'][k]) * step for k in range(3)]
-                a['heading'] = math.atan2(proposed[2] - a['position'][2], proposed[0] - a['position'][0])
-                a['position'] = proposed
-                if a['status'] != 'returning':
-                    a['status'] = 'transport' if a['loaded'] else 'pickup'
-                distance -= length * step
-                if step >= 1:
-                    a['path'].pop(0)
-            if a['status'] == 'returning':
-                if not a['path']:
-                    for segment in a['segments']:
-                        self.reservations.pop(segment, None)
-                    a.update(status='idle', from_id=None, to_id=None, segments=[])
+            if a['traffic_delay']:
+                a['traffic_delay'] -= 1
+                a['status'] = 'waiting_traffic'
+                continue
+            if not a['trajectory']:
+                a.update(status='idle', from_id=None, to_id=None, segments=[], path=[])
+                self.reservations.pop(aid, None)
+                continue
+            entry = a['trajectory'].pop(0)
+            point, mode = entry['position'], entry['mode']
+            previous = a['position']
+            if math.dist(previous, point) > 1e-8:
+                a['heading'] = math.atan2(point[2] - previous[2], point[0] - previous[0])
+            a.update(position=point[:], status=mode)
+            a['path'] = [e['position'][:] for e in a['trajectory'][:100] if e['mode'] == mode]
+            if mode == 'returning':
+                if not a['trajectory']:
+                    a.update(status='idle', from_id=None, to_id=None, path=[])
+                    self.reservations.pop(aid, None)
                 continue
             p = self.parts[a['part_id']]
-            if a['loaded']:
-                p['position'] = [a['position'][0], .9, a['position'][2]]
-            if not a['path']:
-                if not a['loaded']:
-                    a['loaded'] = True
-                    if a['from_id'] in self.machines and p['id'] in self.machines[a['from_id']]['output']:
+            if mode in ('pickup_transfer', 'delivery_transfer'):
+                if p['transfer'] is None:
+                    handoff = a['handoffs'][mode]
+                    self._begin_transfer(p, 'pickup' if mode == 'pickup_transfer' else 'delivery',
+                                         handoff['target'], handoff['duration'])
+                    p['status'] = mode
+                if not self._move_transfer(p, dt):
+                    continue
+                if mode == 'pickup_transfer':
+                    if a['from_id'] in self.machines:
                         self.machines[a['from_id']]['output'].remove(p['id'])
-                    p.update(location=aid, status='transport', waiting_reason=None)
-                    a['path'] = self._path(a['position'], self._dock(a['to_id']))
+                    p.update(location=aid, status='transport', buffer_location=None, buffer_slot=None,
+                             waiting_reason=None)
+                    a['loaded'] = True
                     self._event('picked_up', aid, p['id'], f"{aid} picks up {p['id']}")
                 else:
                     target = a['to_id']
-                    p.update(location=target, position=self._dock(target), assigned_machine=None, target=None)
+                    slot = p['reserved_slot']['slot']
+                    p.update(location=target, assigned_machine=None, target=None,
+                             buffer_location=target, buffer_slot=slot, reserved_slot=None)
                     if target == 'FG':
-                        p.update(status='finished', stage_index=6, completed_at=self.elapsed, waiting_reason=None)
+                        p.update(status='finished', stage_index=6, completed_at=self.elapsed,
+                                 waiting_reason=None, affected=False)
                         self._event('finished', target, p['id'], f"{p['id']} delivered to finished goods")
-                        orderparts = [x for x in self.parts.values() if x['order_id'] == p['order_id']]
-                        if all(x['status'] == 'finished' for x in orderparts):
+                        if all(x['status'] == 'finished' for x in self.parts.values() if x['order_id'] == p['order_id']):
                             self.finished_at[p['order_id']] = self.elapsed
                     else:
                         m = self.machines[target]
@@ -402,7 +463,9 @@ class MachiningEngine:
                         p.update(status='queued', assigned_machine=target, waiting_reason='Awaiting machine / tending robot')
                         self._event('queued', target, p['id'], f"{p['id']} delivered to {target} input")
                     a.update(status='returning', part_id=None, from_id=target, to_id=None, loaded=False,
-                             path=self._path(a['position'], a['parking']), completed_trips=a['completed_trips'] + 1)
+                             completed_trips=a['completed_trips'] + 1)
+            elif a['loaded']:
+                p['position'] = [point[0], .9, point[2]]
 
     def _dispatch(self):
         if self.policy in ('reroute', 'edd'):
@@ -424,23 +487,24 @@ class MachiningEngine:
             if target != 'FG' and not self._capacity(self.machines[target]):
                 p['waiting_reason'] = f'{target} input queue full'
                 continue
-            if target != 'FG' and self.machines[target]['fault_remaining']:
-                p['affected'] = True
             idle = [a for a in self.amrs.values() if a['status'] == 'idle']
             if not idle:
                 p['waiting_reason'] = 'Both AMRs busy'
                 continue
             pickup_dock = self._dock(p['location'])
             a = min(idle, key=lambda a: (a['completed_trips'], math.dist(a['position'], pickup_dock)))
-            pickup, segments = self._transfer_plan(tuple(a['position']), tuple(pickup_dock),
-                                                    tuple(self._dock(target)), tuple(a['parking']))
-            if any(segment in self.reservations for segment in segments):
-                p['waiting_reason'] = 'AMR waiting for reserved aisle segments'
-                continue
-            for segment in segments:
-                self.reservations[segment] = a['id']
-            a.update(status='pickup', part_id=p['id'], from_id=p['location'], to_id=target,
-                     loaded=False, path=[list(point) for point in pickup], segments=list(segments))
+            slot = self._reserve_buffer_slot(target)
+            trajectory, handoffs = self._carrier_trajectory(a, p, target, slot)
+            other = next(x for x in self.amrs.values() if x['id'] != a['id'])
+            other_future = ([dict(position=other['position'][:], mode='waiting_traffic')]
+                            * other['traffic_delay'] + other['trajectory'])
+            delay = departure_delay(a['position'], trajectory, other['position'], other_future)
+            self.reservations[a['id']] = dict(until_tick=self.clock.tick + delay + len(trajectory))
+            p['reserved_slot'] = dict(location=target, slot=slot)
+            a.update(status='waiting_traffic' if delay else 'pickup', part_id=p['id'],
+                     from_id=p['location'], to_id=target, loaded=False, trajectory=trajectory,
+                     traffic_delay=delay, handoffs=handoffs,
+                     path=[e['position'][:] for e in trajectory if e['mode'] == 'pickup'], segments=[])
             if target != 'FG':
                 self.machines[target]['incoming'].append(p['id'])
             p.update(status='awaiting_pickup', waiting_reason='Assigned AMR approaching')
@@ -454,13 +518,22 @@ class MachiningEngine:
         m = self.machines[machine_id]
         m['fault_remaining'] = float(duration_seconds) if active else 0.
         m['status'] = self._machine_status(m)
-        affected = set(m['queue'] + m['incoming'] + ([m['part_id']] if m['part_id'] else []))
-        affected.update(p['id'] for p in self.parts.values() if p['target'] == machine_id)
-        for pid in affected:
-            self.parts[pid]['affected'] = True
+        self._refresh_fault_impact()
         self._event('fault' if active else 'restore', machine_id, m['part_id'],
                     f'{machine_id}: simulated fault for {duration_seconds:g}s' if active else f'{machine_id}: repair completed')
         self.revision += 1
+
+    def _refresh_fault_impact(self):
+        for p in self.parts.values():
+            dependencies = [m for m in self.machines.values() if
+                p['id'] in m['queue'] or p['id'] in m['incoming'] or m['part_id'] == p['id']]
+            if p['target'] in self.machines:
+                dependencies.append(self.machines[p['target']])
+            unavailable = (p['status'] == 'waiting_transport' and p['operation'] != 'finished'
+                and not any(m['operation'] == p['operation'] and not m['fault_remaining']
+                            and p['part_type'] in COMPATIBILITY[m['id']] for m in self.machines.values()))
+            p['affected'] = p['status'] != 'finished' and (unavailable or any(m['fault_remaining'] for m in dependencies))
+            p['historically_affected'] = p.get('historically_affected', False) or p['affected']
 
     def set_policy(self, policy):
         if policy not in ('fifo', 'reroute', 'edd'):
@@ -471,6 +544,7 @@ class MachiningEngine:
                 if p['status'] == 'waiting_transport':
                     p.update(target=None, assigned_machine=None)
             self._reroute_queued()
+        self._refresh_fault_impact()
         self.revision += 1
         self._event('policy_applied', 'dispatch', None, f'Dispatch policy: {policy}')
 
@@ -526,13 +600,49 @@ class MachiningEngine:
         assert len(claimed) == len(set(claimed)), 'Part assigned to multiple processing resources'
         passengers = [a['part_id'] for a in self.amrs.values() if a['part_id']]
         assert len(passengers) == len(set(passengers))
+        incoming = [pid for m in self.machines.values() for pid in m['incoming']]
+        assert len(incoming) == len(set(incoming)), 'Duplicate inbound reservation'
+        slots = []
         for p in self.parts.values():
             assert p['location'] in POSITIONS or p['location'] in self.robots or p['location'] in self.amrs
             assert len(p['position']) == 3 and all(math.isfinite(x) for x in p['position'])
+            location = p['location']
+            if location in self.machines:
+                m = self.machines[location]
+                assert p['id'] in m['queue'] + m['output'] + [m['part_id']]
+            elif location in self.robots:
+                r = self.robots[location]
+                assert r['part_id'] == p['id'] and self.machines[r['machine_id']]['part_id'] == p['id']
+            elif location in self.amrs:
+                a = self.amrs[location]
+                assert a['loaded'] and a['part_id'] == p['id'] and p['id'] not in claimed
+            else:
+                assert p['id'] not in claimed
+            if p.get('buffer_location'):
+                slots.append((p['buffer_location'], p['buffer_slot']))
+            if p.get('reserved_slot'):
+                slots.append((p['reserved_slot']['location'], p['reserved_slot']['slot']))
+            if p['status'] == 'finished':
+                assert location == 'FG' and p['transfer'] is None and p['completed_at'] is not None and not p['affected']
+        assert len(slots) == len(set(slots)), 'Two parts occupy or reserve one buffer slot'
+        for a in self.amrs.values():
+            assert not a['loaded'] or (a['part_id'] and self.parts[a['part_id']]['location'] == a['id'])
+            assert a['status'] not in ('idle', 'returning') or (not a['loaded'] and a['part_id'] is None)
+            if a['part_id']:
+                p = self.parts[a['part_id']]
+                assert p['target'] == a['to_id'] and p['reserved_slot']['location'] == a['to_id']
+                if a['to_id'] in self.machines:
+                    assert p['id'] in self.machines[a['to_id']]['incoming']
+        assert set(incoming) == {a['part_id'] for a in self.amrs.values()
+                                 if a['part_id'] and a['to_id'] in self.machines}, 'Orphan inbound reservation'
+        a, b = self.amrs.values()
+        assert separated(a.get('previous_position', a['position']), a['position'],
+                         b.get('previous_position', b['position']), b['position']), 'Carrier swept paths overlap'
         assert all(p['part_type'] in COMPATIBILITY[m['id']] for m in self.machines.values()
                    for p in [self.parts[pid] for pid in m['queue'] + m['incoming'] + ([m['part_id']] if m['part_id'] else [])])
 
     def snapshot(self):
+        self._refresh_fault_impact()
         orders = []
         for o in self.config.orders:
             parts = [p for p in self.parts.values() if p['order_id'] == o.id]
@@ -540,7 +650,8 @@ class MachiningEngine:
             finish = self.finished_at.get(o.id)
             orders.append(dict(**o.model_dump(), completed=done, status='completed' if done == o.quantity else 'in_progress' if self.elapsed else 'released',
                 projected_finish=finish, tardiness=round(max(0., (finish if finish is not None else self.elapsed) - o.due_seconds), 3),
-                affected=any(p['affected'] for p in parts)))
+                affected=any(p['affected'] for p in parts),
+                historically_affected=any(p.get('historically_affected', False) for p in parts)))
         completed = sum(p['status'] == 'finished' for p in self.parts.values())
         utilization = {rid: round(r['busy_seconds'] / max(self.elapsed, .2), 4) for rid, r in self.robots.items()}
         metrics = dict(completed_parts=completed, total_parts=len(self.parts), wip=len(self.parts) - completed,
@@ -548,25 +659,31 @@ class MachiningEngine:
             tardy_seconds=round(sum(o['tardiness'] for o in orders), 3), robot_utilization=utilization)
         bottlenecks = []
         for mid, m in self.machines.items():
-            waiting = [p for p in self.parts.values() if p['target'] == mid or (p['assigned_machine'] == mid and p['status'] == 'queued')]
+            dispatch = [p['id'] for p in self.parts.values() if p['target'] == mid and p['status'] == 'waiting_transport']
+            waiting = [self.parts[pid] for pid in m['queue'] + m['incoming'] + dispatch]
             if m['fault_remaining'] or waiting:
                 bottlenecks.append(dict(resource=mid, reason='Machine fault: processing / handoff paused' if m['fault_remaining'] else 'Finite input / tending capacity',
+                    queued_parts=len(m['queue']), incoming_parts=len(m['incoming']), awaiting_dispatch_parts=len(dispatch),
                     waiting_parts=len(waiting), order_ids=sorted({p['order_id'] for p in waiting} | ({self.parts[m['part_id']]['order_id']} if m['part_id'] else set()))))
         events = [dict(seq=e['seq'], time=round(e['sim_tick'] * self.clock.dt, 3), kind=e['event_type'], resource=e['source_id'],
                        part_id=e['cell_id'], message=e['message']) for e in self.bus.recent(100)]
         robots = copy.deepcopy(list(self.robots.values()))
         for r in robots:
             r['utilization'] = utilization[r['id']]
+        amrs = copy.deepcopy(list(self.amrs.values()))
+        for a in amrs:
+            a.pop('trajectory', None)
+            a.pop('handoffs', None)
         return dict(run_id=self.run_id, revision=self.revision, elapsed=self.elapsed, paused=self.paused, speed=self.speed,
                     policy=self.policy, complete=self.complete, orders=orders, parts=copy.deepcopy(list(self.parts.values())),
-                    machines=copy.deepcopy(list(self.machines.values())), robots=robots, amrs=copy.deepcopy(list(self.amrs.values())),
+                    machines=copy.deepcopy(list(self.machines.values())), robots=robots, amrs=amrs,
                     metrics=metrics, bottlenecks=bottlenecks, events=events, assumptions=[
                         'Demonstration simulation only; no real telemetry, machine control or material-removal physics.',
                         'Shaft: turning → milling → deburr → wash → inspection. Sleeve skips milling.',
                         'Input queues hold 2 parts including inbound and loading rollback reservations; unloading reserves an output slot. RAW/FG hold the finite order set.',
                         'Two exclusive rail robots each tend three CNCs; station transfers and fixtures are simplified.',
-                        'RAW/FG and queue positions are discrete rack/pallet slots. Dock-to-rack transfer mechanisms are instantaneous; AMRs use the fixed station handoff, never drive into stored inventory.',
-                        'Two AMRs reserve every 3 m aisle segment through pickup, delivery and empty return before departure; overlapping trips serialize. Idle carriers park in side bays. This is not certified collision planning.',
+                        'RAW/FG and queues use stable reserved slots; timed rack/dock and station handoffs move parts continuously before inventory or processing commits.',
+                        'Two AMRs reserve occupied trajectory intervals, including waits, dock service and empty returns. Time-separated paths operate concurrently with 2.4 m geometric separation; this is not certified collision planning.',
                         'Family setup 8 s; CNC faults retain clamped work. Interrupted robot handoffs retract/return input or complete picked output, then release the shared robot. Only unstarted queued work can reroute.',
                         'CNC production faults leave the independent robot and releasable fixtures operational; coupled safety stops or seized grippers are not modeled.',
                         'Projected finish is available when an order completes; compare policies for forward simulation estimates.',

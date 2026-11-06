@@ -18,6 +18,8 @@ The **精密加工车间** at `/workshop.html` now runs an order-driven machinin
 
 The accepted local scene demo remains at `/workshop.html?mode=demo` (baseline tag `demo-baseline-v2`). Production mode requires the backend, freezes on disconnection and does not connect to real equipment. The original RFTwin application remains at `/`. See [加工车间操作说明、技术结构与演示边界](docs/WORKSHOP_ZH.md).
 
+Production inventory is rendered only from authoritative parts. Timed handoffs and time-based carrier trajectory reservations preserve continuous material flow while allowing safe concurrent travel. Active fault impact is separate from historical impact, and queues distinguish on-site, inbound and upstream pending work. SQLite checkpoints preserve production and full event history across restarts; the production-history panel can inspect and restore saved runs as a new paused run. Default storage is `.data/workshop.sqlite3`, configurable with `TWIN_WORKSHOP_DB`.
+
 **A browser-native digital twin of a robotic production line — backend-authoritative, deterministic, explainable.**
 Four process cells, 12 robot arms and an AMR fleet run in a Python simulation engine; the 3D factory in the browser only
 renders. Same seed, same result — so every KPI, dispatch and detour can be traced to its cause.
@@ -77,7 +79,7 @@ parameter provenance). Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Tests & CI
 
-`npm run ci` regenerates schemas, fixture and types and runs **157 pytest** cases; Playwright covers **16 e2e** cases
+`npm run ci` regenerates schemas, fixture and types and runs the backend regression suite; Playwright covers
 (viewport, Reset, detour, perception/dispatch, language switch, view interactions and error containment, cross-tab sync, live Reset). The GitHub Actions workflow runs the same
 pipeline plus a live-backend e2e stage (`.github/workflows/ci.yml`). See [`docs/TESTING.md`](docs/TESTING.md).
 

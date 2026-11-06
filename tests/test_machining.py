@@ -301,8 +301,14 @@ def test_recovery_can_be_cloned_and_rerouted_without_mutating_live_state():
 @pytest.mark.parametrize('policy', ['reroute', 'edd'])
 def test_unload_recovery_reserves_output_before_rerouting_queued_parts(policy):
     engine = MachiningEngine()
-    engine.advance(89)
-    robot = engine.robots['R01']
+    for _ in range(3000):
+        engine.advance(.2)
+        robot = engine.robots['R01']
+        if (robot['action'] == 'unload' and engine.parts[robot['part_id']]['location'] == 'R01'
+                and len(engine.machines[robot['machine_id']]['queue']) == 2):
+            break
+    else:
+        pytest.fail('Did not reach a picked unload with two queued parts')
     assert robot['action'] == 'unload' and engine.parts[robot['part_id']]['location'] == 'R01'
     mid, pid = robot['machine_id'], robot['part_id']
     assert len(engine.machines[mid]['queue']) == 2

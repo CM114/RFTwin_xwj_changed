@@ -64,8 +64,8 @@ function Tag({ asset, active, onSelect, position }: {
     accent={color} active={active} onClick={() => onSelect(asset)} />;
 }
 
-export function Lathe({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0, active = true }: {
-  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number; active?: boolean;
+export function Lathe({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0, active = true, showStock = true }: {
+  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number; active?: boolean; showStock?: boolean;
 }) {
   const spindle = useRef<THREE.Group>(null);
   const tool = useRef<THREE.Group>(null);
@@ -107,8 +107,8 @@ export function Lathe({ selected, onSelect, faulted = false, cutaway = false, el
           <meshStandardMaterial color="#a5b0b3" metalness={0.85} roughness={0.25} /></mesh>
         <mesh castShadow position={[0, 0, -0.18]} rotation-x={Math.PI / 2}>
           <cylinderGeometry args={[0.4, 0.4, 0.11, 24]} /><meshStandardMaterial color="#44535a" metalness={0.8} roughness={0.28} /></mesh>
-        <mesh castShadow position={[0, 0, 0.47]} rotation-x={Math.PI / 2}>
-          <cylinderGeometry args={[0.16, 0.16, 0.88, 20]} /><meshStandardMaterial color="#c6d1cf" metalness={0.9} roughness={0.2} /></mesh>
+        {showStock && <mesh castShadow position={[0, 0, 0.47]} rotation-x={Math.PI / 2}>
+          <cylinderGeometry args={[0.16, 0.16, 0.88, 20]} /><meshStandardMaterial color="#c6d1cf" metalness={0.9} roughness={0.2} /></mesh>}
       </group>
       <group ref={tool} position={[-1.08, 1.62, -1.25]}>
         <mesh castShadow position={[0, -0.25, 0]}><boxGeometry args={[0.68, 0.34, 0.72]} />
@@ -129,8 +129,8 @@ export function Lathe({ selected, onSelect, faulted = false, cutaway = false, el
   );
 }
 
-export function Mill({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0, active = true }: {
-  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number; active?: boolean;
+export function Mill({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0, active = true, showStock = true }: {
+  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number; active?: boolean; showStock?: boolean;
 }) {
   const spindleHead = useRef<THREE.Group>(null);
   const table = useRef<THREE.Group>(null);
@@ -183,8 +183,8 @@ export function Mill({ selected, onSelect, faulted = false, cutaway = false, ela
           <meshStandardMaterial color="#79888a" metalness={0.72} roughness={0.28} /></mesh>
         <mesh castShadow position={[0, 0.28, 0]}><boxGeometry args={[0.72, 0.45, 0.58]} />
           <meshStandardMaterial color="#bd8a49" metalness={0.5} roughness={0.3} /></mesh>
-        <mesh castShadow position={[0, 0.53, 0]} rotation-x={Math.PI / 2}>
-          <cylinderGeometry args={[0.22, 0.22, 0.42, 18]} /><meshStandardMaterial color="#d1dcda" metalness={0.88} roughness={0.2} /></mesh>
+        {showStock && <mesh castShadow position={[0, 0.53, 0]} rotation-x={Math.PI / 2}>
+          <cylinderGeometry args={[0.22, 0.22, 0.42, 18]} /><meshStandardMaterial color="#d1dcda" metalness={0.88} roughness={0.2} /></mesh>}
       </group>
       <ControlPanel faulted={faulted} position={[-1.47, 1.04, -2.02]} />
       <SignalTower position={[1.58, 3.34, -1.17]} status={status} />
@@ -274,9 +274,9 @@ export function Robot({ asset, machine, rotation, position, selected, onSelect, 
   </group>;
 }
 
-export function AMR({ asset, position, heading, selected, carrying = false, onSelect, showLabels = true, elapsed = 0 }: {
+export function AMR({ asset, position, heading, selected, carrying = false, onSelect, showLabels = true, elapsed = 0, showStock = true }: {
   asset: WorkshopAsset; position: [number, number]; heading: number; selected: boolean;
-  carrying?: boolean; onSelect: () => void; showLabels?: boolean; elapsed?: number;
+  carrying?: boolean; onSelect: () => void; showLabels?: boolean; elapsed?: number; showStock?: boolean;
 }) {
   const lidar = useRef<THREE.Group>(null);
   useFrame((_, delta) => { if (lidar.current) lidar.current.rotation.y = elapsed * 1.2; });
@@ -295,7 +295,7 @@ export function AMR({ asset, position, heading, selected, carrying = false, onSe
       <mesh castShadow position={[0.23, 0, 0]} rotation-z={Math.PI / 2}>
         <cylinderGeometry args={[0.2, 0.2, 0.16, 24]} />
         <meshStandardMaterial color="#b9c6c1" metalness={0.86} roughness={0.2} /></mesh>
-    </group> : asset.id === 'AMR02' ? <mesh castShadow position={[0.02, 0.72, 0.02]}><boxGeometry args={[0.7, 0.3, 0.56]} />
+    </group> : showStock && asset.id === 'AMR02' ? <mesh castShadow position={[0.02, 0.72, 0.02]}><boxGeometry args={[0.7, 0.3, 0.56]} />
       <meshStandardMaterial color="#c58e4e" metalness={0.24} roughness={0.46} /></mesh> : null}
     <group ref={lidar} position={[-0.5, 0.66, 0]}>
       <mesh><cylinderGeometry args={[0.08, 0.1, 0.26, 16]} />
@@ -315,8 +315,8 @@ export function AMR({ asset, position, heading, selected, carrying = false, onSe
   </group>;
 }
 
-export function StaticAsset({ asset, selected, onSelect, showLabels = true }: {
-  asset: WorkshopAsset; selected: boolean; onSelect: () => void; showLabels?: boolean;
+export function StaticAsset({ asset, selected, onSelect, showLabels = true, showStock = true }: {
+  asset: WorkshopAsset; selected: boolean; onSelect: () => void; showLabels?: boolean; showStock?: boolean;
 }) {
   const { kind, footprint } = asset;
   const [w, d] = footprint;
@@ -329,34 +329,34 @@ export function StaticAsset({ asset, selected, onSelect, showLabels = true }: {
     onClick={(event: ThreeEvent<MouseEvent>) => { event.stopPropagation(); onSelect(); }}>
     <mesh position={[0, 0.035, 0]} rotation-x={-Math.PI / 2}>
       <planeGeometry args={[w + 0.35, d + 0.35]} /><meshStandardMaterial color={selected ? "#1b554a" : "#233239"} emissive={selected ? "#174c40" : "#0b1114"} emissiveIntensity={0.3} /></mesh>
-    {kind === "raw" || kind === "finished" ? <PalletStock w={w} d={d} color={material.color} /> :
-      kind === "buffer" ? <BufferSlots w={w} d={d} /> :
-      kind === "charger" ? <ChargePad w={w} d={d} /> : <WorkStation kind={kind} w={w} d={d} height={height} material={material} />}
+    {kind === "raw" || kind === "finished" ? <PalletStock w={w} d={d} color={material.color} showStock={showStock} /> :
+      kind === "buffer" ? <BufferSlots w={w} d={d} showStock={showStock} /> :
+      kind === "charger" ? <ChargePad w={w} d={d} /> : <WorkStation kind={kind} w={w} d={d} height={height} material={material} showStock={showStock} />}
     {selected && <SelectionHalo color="#70e5ce" />}
     {showLabels && <Tag asset={asset} active={selected} onSelect={onSelect} />}
   </group>;
 }
 
-function PalletStock({ w, d, color }: { w: number; d: number; color: THREE.Color }) {
+function PalletStock({ w, d, color, showStock }: { w: number; d: number; color: THREE.Color; showStock: boolean }) {
   const count = 3;
   return <group>{Array.from({ length: count }, (_, index) => {
     const x = (index - 1) * Math.min(1.15, w / 4);
     return <group key={index} position={[x, 0.14, 0]}>
       <mesh castShadow><boxGeometry args={[0.94, 0.22, Math.min(d * 0.5, 1.3)]} /><meshStandardMaterial color="#9d8059" roughness={0.85} /></mesh>
-      {[0, 1, 2].map((layer) => <mesh key={layer} castShadow position={[0, 0.18 + layer * 0.15, 0]}>
+      {showStock && [0, 1, 2].map((layer) => <mesh key={layer} castShadow position={[0, 0.18 + layer * 0.15, 0]}>
         <boxGeometry args={[0.74, 0.27, Math.min(d * 0.38, 0.9)]} />
         <meshStandardMaterial color={color} roughness={0.52} metalness={0.22} /></mesh>)}
     </group>;
   })}</group>;
 }
 
-function BufferSlots({ w, d }: { w: number; d: number }) {
+function BufferSlots({ w, d, showStock }: { w: number; d: number; showStock: boolean }) {
   const count = 3;
   return <group>{Array.from({ length: count }, (_, index) => <group key={index} position={[(index - 1) * w * 0.29, 0, 0]}>
     <mesh position={[0, 0.07, 0]}><boxGeometry args={[w * 0.25, 0.1, d * 0.8]} />
       <meshStandardMaterial color="#849398" metalness={0.68} roughness={0.32} /></mesh>
-    <mesh position={[0, 0.42, 0]} castShadow><boxGeometry args={[0.7, 0.58, 0.53]} />
-      <meshStandardMaterial color="#9e8555" metalness={0.2} roughness={0.5} /></mesh>
+    {showStock && <mesh position={[0, 0.42, 0]} castShadow><boxGeometry args={[0.7, 0.58, 0.53]} />
+      <meshStandardMaterial color="#9e8555" metalness={0.2} roughness={0.5} /></mesh>}
   </group>)}</group>;
 }
 
@@ -371,8 +371,8 @@ function ChargePad({ w, d }: { w: number; d: number }) {
   </group>;
 }
 
-function WorkStation({ kind, w, d, height, material }: {
-  kind: string; w: number; d: number; height: number; material: THREE.Material;
+function WorkStation({ kind, w, d, height, material, showStock }: {
+  kind: string; w: number; d: number; height: number; material: THREE.Material; showStock: boolean;
 }) {
   const storage = kind === "tooling" || kind === "maintenance";
   const columns = storage ? 3 : 2;
@@ -381,13 +381,13 @@ function WorkStation({ kind, w, d, height, material }: {
     const x = ((i % columns) - (columns - 1) / 2) * Math.min(w / columns, 1.25);
     const z = (Math.floor(i / columns) - (rows - 1) / 2) * Math.min(d * 0.34, 1.0);
     return <group key={i} position={[x, 0, z]}>
-      {storage ? <StorageRack height={height} material={material} /> :
+      {storage ? <StorageRack height={height} material={material} showStock={showStock} /> :
         <group>
           <mesh castShadow position={[0, height / 2, 0]}><boxGeometry args={[Math.min(w * 0.36, 1.35), height, Math.min(d * 0.46, 1.45)]} />
             <primitive object={material} attach="material" /></mesh>
           <mesh castShadow position={[0, height + 0.1, 0]}><boxGeometry args={[Math.min(w * 0.39, 1.48), 0.18, Math.min(d * 0.49, 1.58)]} />
             <meshStandardMaterial color="#bdc7c0" metalness={0.65} roughness={0.36} /></mesh>
-          {kind === "inspection" && <MeasureGauge />}
+          {kind === "inspection" && <MeasureGauge showStock={showStock} />}
           {kind === "washer" && <mesh position={[0, height * 0.66, 0.74]}>
             <torusGeometry args={[0.22, 0.05, 8, 18]} /><meshStandardMaterial color="#aab8b1" metalness={0.85} /></mesh>}
           {kind === "deburr" && <mesh castShadow position={[0.2, height + 0.3, 0]}>
@@ -397,17 +397,17 @@ function WorkStation({ kind, w, d, height, material }: {
   })}</group>;
 }
 
-function StorageRack({ height, material }: { height: number; material: THREE.Material }) {
+function StorageRack({ height, material, showStock }: { height: number; material: THREE.Material; showStock: boolean }) {
   return <group>
     <mesh castShadow position={[0, height / 2, 0]}><boxGeometry args={[0.11, height, 0.12]} /><primitive object={material} attach="material" /></mesh>
     {[-0.4, 0.35, 0.8].map((y) => <mesh key={y} castShadow position={[0.15, y, 0]}>
       <boxGeometry args={[0.76, 0.1, 0.7]} /><meshStandardMaterial color="#718188" metalness={0.57} roughness={0.38} /></mesh>)}
-    <mesh castShadow position={[0.15, 0.04, 0]}><boxGeometry args={[0.58, 0.56, 0.53]} />
-      <meshStandardMaterial color="#d3a754" roughness={0.78} /></mesh>
+    {showStock && <mesh castShadow position={[0.15, 0.04, 0]}><boxGeometry args={[0.58, 0.56, 0.53]} />
+      <meshStandardMaterial color="#d3a754" roughness={0.78} /></mesh>}
   </group>;
 }
 
-function MeasureGauge() {
+function MeasureGauge({ showStock }: { showStock: boolean }) {
   return <group position={[0.1, 1.15, 0]}>
     <mesh castShadow position={[0, 0.33, 0]}><boxGeometry args={[0.15, 0.1, 0.86]} />
       <meshStandardMaterial color="#b9c9c4" metalness={0.86} roughness={0.2} /></mesh>
@@ -415,8 +415,8 @@ function MeasureGauge() {
       <meshStandardMaterial color="#aebbb5" metalness={0.78} roughness={0.25} /></mesh>
     <mesh castShadow position={[0, 0.05, 0.34]}><boxGeometry args={[0.14, 0.62, 0.12]} />
       <meshStandardMaterial color="#aebbb5" metalness={0.78} roughness={0.25} /></mesh>
-    <mesh castShadow position={[0, 0.02, 0]}><cylinderGeometry args={[0.18, 0.18, 0.12, 20]} />
-      <meshStandardMaterial color="#c48a48" metalness={0.8} roughness={0.27} /></mesh>
+    {showStock && <mesh castShadow position={[0, 0.02, 0]}><cylinderGeometry args={[0.18, 0.18, 0.12, 20]} />
+      <meshStandardMaterial color="#c48a48" metalness={0.8} roughness={0.27} /></mesh>}
   </group>;
 }
 

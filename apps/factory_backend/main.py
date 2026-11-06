@@ -55,6 +55,7 @@ _lock = asyncio.Lock()
 async def lifespan(app):
     global WORK_ORDER_SESSION
     WORK_ORDER_SESSION = uuid.uuid4().hex
+    workshop_service.startup()
     eng = FactoryEngine(run_id="LIVE-001", seed=42)
     eng.preroll()
     RUNS["LIVE-001"] = eng
@@ -66,6 +67,7 @@ async def lifespan(app):
         task.cancel()
         workshop_task.cancel()
         await asyncio.gather(task, workshop_task, return_exceptions=True)
+        workshop_service.shutdown()
 
 
 app = FastAPI(title="Robot Factory Digital Twin", version="0.10.2", lifespan=lifespan)

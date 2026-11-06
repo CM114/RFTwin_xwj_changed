@@ -230,6 +230,7 @@ export function WorkshopScene({
       <Roof visible={view === "orbit" && !production} />
       {ASSETS.filter(({ kind }) => kind === "lathe" || kind === "mill").map((asset) => {
         const machine = state.machines[asset.id];
+        const status = production?.machines.find(item => item.id === asset.id)?.status ?? machine?.status ?? 'idle';
         const selected = selectedId === asset.id;
         const faulted = machine?.status === "fault";
         const active = !production || machine?.status === 'running';
@@ -237,12 +238,12 @@ export function WorkshopScene({
         return <group key={asset.id} position={[asset.position[0], 0, asset.position[1]]}>
           <group rotation-y={asset.kind === "lathe" ? Math.PI : 0}>
             {asset.kind === "lathe" ? <Lathe selected={selected} onSelect={onClick} faulted={faulted} active={active} elapsed={state.elapsed}
-              cutaway /> :
+              cutaway showStock={!production} /> :
               <Mill selected={selected} onSelect={onClick} faulted={faulted} active={active} elapsed={state.elapsed}
-                cutaway />}
+                cutaway showStock={!production} />}
           </group>
           {showLabels && <TagFromParent asset={asset} zone={zoneTitles[asset.zone] ?? ""} selected={selected}
-            status={machine?.status ?? "idle"} onSelect={onClick} copy={copy} />}
+            status={status} lang={lang} onSelect={onClick} copy={copy} />}
         </group>;
       })}
       {ROBOT_CELLS.map((cell, index) => {
@@ -264,7 +265,7 @@ export function WorkshopScene({
         const carrier = production?.amrs.find(item => item.id === asset.id);
         const pose = carrier ? { position: [carrier.position[0], carrier.position[2]] as [number, number], heading: carrier.heading } : index === 0 ? carrierPose : amrPose(state.elapsed, index);
         return <AMR key={asset.id} asset={asset} position={pose.position} heading={pose.heading}
-          carrying={false} showLabels={showLabels} elapsed={state.elapsed}
+          carrying={false} showStock={!production} showLabels={showLabels} elapsed={state.elapsed}
           selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />;
       })}
       {production ? production.parts.map(part => <group key={part.id}>
@@ -281,7 +282,7 @@ export function WorkshopScene({
         <ringGeometry args={[2.45, 2.55, 40]} /><meshBasicMaterial color="#e7a355" side={THREE.DoubleSide} transparent opacity={0.7} />
       </mesh> : null; })}
       {ASSETS.filter(({ kind }) => !["lathe", "mill", "robot", "amr"].includes(kind)).map((asset) =>
-        <StaticAsset key={asset.id} asset={asset} showLabels={showLabels} selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />)}
+        <StaticAsset key={asset.id} asset={asset} showStock={!production} showLabels={showLabels} selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />)}
       <OrbitControls ref={controls} makeDefault enableDamping enablePan={view !== "focus"} dampingFactor={0.07} minPolarAngle={0.12}
         maxPolarAngle={Math.PI * 0.48} minDistance={16} maxDistance={75} target={[0, 0, 0]} />
       <CameraRig view={view} controls={controls} focusPosition={focusPose?.position}
@@ -290,13 +291,15 @@ export function WorkshopScene({
   </Canvas>;
 }
 
-function TagFromParent({ asset, zone, selected, status, onSelect, copy }: {
-  asset: WorkshopAsset; zone: string; selected: boolean; status: string;
+function TagFromParent({ asset, zone, selected, status, lang, onSelect, copy }: {
+  asset: WorkshopAsset; zone: string; selected: boolean; status: string; lang: 'zh' | 'en';
   onSelect: () => void; copy: Copy;
 }) {
-  const colors: Record<string, string> = { running: "#57d5ad", setup: "#efb35a", idle: "#758894", fault: "#fa655b" };
+  const colors: Record<string, string> = { running: "#57d5ad", setup: "#efb35a", idle: "#758894", fault: "#fa655b", waiting: '#efb35a', blocked: '#e9976d' };
+  const label = status === 'waiting' ? (lang === 'zh' ? '等待资源' : 'Waiting')
+    : status === 'blocked' ? (lang === 'zh' ? '下游阻塞' : 'Blocked') : copy[status as keyof Copy] ?? status;
   return <WorldPlate name={`machine-label-${asset.id}`} position={[asset.footprint[0] / 2 + 1.65, 0.18, 0]}
-    rotation={[-Math.PI / 2, 0, 0]} size={[2.7, 0.66]} title={`${asset.id} · ${copy[status as keyof Copy] ?? status}`}
+    rotation={[-Math.PI / 2, 0, 0]} size={[2.7, 0.66]} title={`${asset.id} · ${label}`}
     detail={zone} accent={colors[status] ?? colors.idle} active={selected} onClick={onSelect} />;
 }
 
@@ -320,6 +323,6 @@ function ProductionRoutes({ snapshot }: { snapshot: ProductionSnapshot }) {
   return <group>{snapshot.amrs.filter(amr => amr.path.length).map(amr => {
     const points = [amr.position, ...amr.path].map(([x, , z]) => [x, 0.2, z] as [number, number, number]);
     return <Line key={amr.id} points={points}
-      color={amr.part_id ? '#7ce8bd' : '#81acc6'} lineWidth={2} dashed dashSize={0.5} gapSize={0.3} />;
+      color={amr.loaded ? '#7ce8bd' : '#81acc6'} lineWidth={2} dashed dashSize={0.5} gapSize={0.3} />;
   })}</group>;
 }
