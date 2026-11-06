@@ -49,7 +49,9 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Frontend type-check & build   # build 腳本本身含 tsc --noEmit
-        run: npm --prefix frontend run build
+        run: |
+          npm --prefix frontend run test:model
+          npm --prefix frontend run build
 
       - name: Playwright (offline / Local Demo)
         working-directory: frontend
@@ -63,13 +65,14 @@ jobs:
         working-directory: frontend
         env:
           E2E_LIVE: "1"
+          PW_WORKSHOP_LIVE: "1"
           TWIN_PORT: "8010"
           TWIN_RATE_LIMIT: "0"
           PYTHONPATH: ../packages
         run: |
           (cd .. && PYTHONPATH=packages TWIN_RATE_LIMIT=0 python -m uvicorn apps.factory_backend.main:app --port 8010 --ws wsproto &) 
           for i in $(seq 1 60); do curl -sf http://localhost:8010/api/health >/dev/null && break; sleep 1; done
-          npx playwright test i18n_live reset_live sync
+          npx playwright test i18n_live reset_live sync workshop-production
 
       - name: Upload Playwright report on failure
         if: failure()

@@ -64,15 +64,15 @@ function Tag({ asset, active, onSelect, position }: {
     accent={color} active={active} onClick={() => onSelect(asset)} />;
 }
 
-export function Lathe({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0 }: {
-  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number;
+export function Lathe({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0, active = true }: {
+  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number; active?: boolean;
 }) {
   const spindle = useRef<THREE.Group>(null);
   const tool = useRef<THREE.Group>(null);
   const progress = useRef(0);
-  const status = faulted ? statusColor.fault : statusColor.running;
+  const status = faulted ? statusColor.fault : active ? statusColor.running : statusColor.idle;
   useFrame((_, delta) => {
-    if (faulted) return;
+    if (faulted || !active) return;
     progress.current = elapsed;
     if (spindle.current) spindle.current.rotation.z = elapsed * 4.2;
     if (tool.current) tool.current.position.x = -1.08 + Math.sin(progress.current * 0.65) * 0.24;
@@ -129,15 +129,15 @@ export function Lathe({ selected, onSelect, faulted = false, cutaway = false, el
   );
 }
 
-export function Mill({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0 }: {
-  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number;
+export function Mill({ selected, onSelect, faulted = false, cutaway = false, elapsed = 0, active = true }: {
+  selected: boolean; onSelect: () => void; faulted?: boolean; cutaway?: boolean; elapsed?: number; active?: boolean;
 }) {
   const spindleHead = useRef<THREE.Group>(null);
   const table = useRef<THREE.Group>(null);
   const progress = useRef(0);
-  const status = faulted ? statusColor.fault : statusColor.running;
+  const status = faulted ? statusColor.fault : active ? statusColor.running : statusColor.idle;
   useFrame((_, delta) => {
-    if (faulted) return;
+    if (faulted || !active) return;
     progress.current = elapsed;
     if (spindleHead.current) {
       spindleHead.current.position.y = 2.2 + Math.sin(progress.current * 0.7) * 0.23;

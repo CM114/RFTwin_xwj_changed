@@ -123,6 +123,7 @@ export default function WorkshopApp() {
         <span><strong>{T.title}</strong><small>{T.subtitle}</small></span>
       </a>
       <div className="shop-header-meta">
+        <a className="mode-link" href="/workshop.html">{lang === 'zh' ? '生产仿真' : 'Production simulation'}</a>
         <span className="demo-status"><i />{T.demo}</span>
         <span className="header-separator" />
         <span className="shop-dimension">48 × 30 m <small>{T.floorSize}</small></span>

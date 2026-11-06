@@ -43,7 +43,10 @@ for (const [file, body] of Object.entries(outputs)) {
   const path = join(OUT_DIR, file);
   if (check) {
     const current = existsSync(path) ? readFileSync(path, "utf8") : "";
-    if (current !== body) { console.error(`${file} 與 schema 產物不一致`); stale = true; }
+    // Git may check out generated files with CRLF on Windows; compare their content.
+    if (current.replace(/\r\n/g, "\n") !== body.replace(/\r\n/g, "\n")) {
+      console.error(`${file} 與 schema 產物不一致`); stale = true;
+    }
   } else {
     writeFileSync(path, body);
     console.log(`wrote frontend/src/types/${file}`);

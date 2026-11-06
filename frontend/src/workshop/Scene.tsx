@@ -6,6 +6,8 @@ import type { Copy } from "./copy";
 import { AMR, Lathe, Mill, Robot, RobotRail, StaticAsset, WorldPlate, ZoneSign } from "./Objects";
 import { amrPose, assetPose, ASSETS, PROCESS_PATH, PROCESS_STAGES, ROBOT_CELLS, processPose, robotPose, WORKPIECE_ASSET } from "./model";
 import type { SimulationState, WorkshopAsset } from "./model";
+import { productionAssetPose } from './production';
+import type { ProductionSnapshot } from './production';
 
 type ViewMode = "orbit" | "top" | "focus";
 
@@ -19,8 +21,8 @@ const zoneLabels = {
   support: { zh: "工装 · 维修支持", en: "TOOLING · MAINTENANCE", color: "#9aabb2" },
 } as const;
 
-function WorkshopFloor({ lang, labels, routes, activeStage }: {
-  lang: "zh" | "en"; labels: boolean; routes: boolean; activeStage: number;
+function WorkshopFloor({ lang, labels, routes, activeStage, production = false }: {
+  lang: "zh" | "en"; labels: boolean; routes: boolean; activeStage: number; production?: boolean;
 }) {
   const processLine = useMemo(() => PROCESS_PATH.map(([x, z]) => [x, 0.14, z] as [number, number, number]), []);
   return <group>
@@ -54,7 +56,7 @@ function WorkshopFloor({ lang, labels, routes, activeStage }: {
     <FloorBay position={[20, -8]} size={[5.4, 7]} color="#d4ad69" />
     <FloorBay position={[-20, 9.8]} size={[5.4, 9]} color="#9aadb2" />
     {routes && <>
-      <Line points={processLine} color="#72dfb9" lineWidth={2.4} dashed dashSize={0.62} gapSize={0.3} />
+      {!production && <Line points={processLine} color="#72dfb9" lineWidth={2.4} dashed dashSize={0.62} gapSize={0.3} />}
       {PROCESS_STAGES.map(({ id, position }, index) => <ProcessStation key={id} id={id} position={position}
         active={activeStage === index} />)}
       <RouteArrow from={[-16, 0.19, -6]} to={[-16, 0.19, -4]} color="#72dfb9" />
@@ -190,16 +192,21 @@ function CameraRig({ view, controls, focusPosition, focusHeight, selectedId }: {
 }
 
 export function WorkshopScene({
-  lang, state, selectedId, onSelect, showLabels, showRoutes, view, focusPosition, copy, onReady,
+  lang, state, selectedId, onSelect, showLabels, showRoutes, view, focusPosition, copy, onReady, production,
 }: {
   lang: "zh" | "en"; state: SimulationState; selectedId: string | null;
   onSelect: (asset: WorkshopAsset) => void; showLabels: boolean; showRoutes: boolean;
   view: ViewMode; focusPosition?: [number, number]; copy: Copy; onReady: () => void;
+  production?: ProductionSnapshot;
 }) {
   const controls = useRef<any>(null);
   const carrierPose = processPose(state.elapsed);
-  const selectedAsset = selectedId === WORKPIECE_ASSET.id ? WORKPIECE_ASSET : ASSETS.find(({ id }) => id === selectedId);
-  const focusPose = selectedAsset ? assetPose(selectedAsset, state.elapsed) : undefined;
+  const productionPart = production?.parts.find(part => part.id === selectedId);
+  const selectedAsset = productionPart ? { ...WORKPIECE_ASSET, id: productionPart.id }
+    : selectedId === WORKPIECE_ASSET.id ? WORKPIECE_ASSET : ASSETS.find(({ id }) => id === selectedId);
+  const focusPose = production ? productionAssetPose(production, selectedId ?? '')
+    ?? (selectedAsset ? { position: selectedAsset.position, height: 1.5 } : undefined)
+    : selectedAsset ? assetPose(selectedAsset, state.elapsed) : undefined;
   const zoneTitles: Record<string, string> = useMemo(() => Object.fromEntries(
     Object.entries(zoneLabels).map(([key, value]) => [key, lang === "zh" ? value.zh : value.en]),
   ), [lang]);
@@ -217,19 +224,23 @@ export function WorkshopScene({
       <directionalLight position={[12, 14, 20]} intensity={0.56} color="#a5d5df" />
       <pointLight position={[-5, 10, 0]} intensity={40} distance={35} color="#78d7b4" />
       <pointLight position={[16, 9, 4]} intensity={32} distance={30} color="#76c4da" />
-      <WorkshopFloor lang={lang} labels={showLabels} routes={showRoutes} activeStage={processPose(state.elapsed).stageIndex} />
-      <Roof visible={view === "orbit"} />
+      <WorkshopFloor lang={lang} labels={showLabels} routes={showRoutes} production={!!production}
+        activeStage={production ? productionPart?.stage_index ?? -1 : carrierPose.stageIndex} />
+      {production && showRoutes && <ProductionRoutes snapshot={production} />}
+      <Roof visible={view === "orbit" && !production} />
       {ASSETS.filter(({ kind }) => kind === "lathe" || kind === "mill").map((asset) => {
         const machine = state.machines[asset.id];
         const selected = selectedId === asset.id;
         const faulted = machine?.status === "fault";
+        const active = !production || machine?.status === 'running';
+        const cutting = production ? !!production.parts.find(part => part.location === asset.id) : asset.id === PROCESS_STAGES[carrierPose.stageIndex].id && ['load', 'unload', 'process'].includes(carrierPose.phase);
         const onClick = () => onSelect(asset);
         return <group key={asset.id} position={[asset.position[0], 0, asset.position[1]]}>
           <group rotation-y={asset.kind === "lathe" ? Math.PI : 0}>
-            {asset.kind === "lathe" ? <Lathe selected={selected} onSelect={onClick} faulted={faulted} elapsed={state.elapsed}
-              cutaway={(view === "focus" && selected) || (asset.id === PROCESS_STAGES[carrierPose.stageIndex].id && ['load', 'unload', 'process'].includes(carrierPose.phase))} /> :
-              <Mill selected={selected} onSelect={onClick} faulted={faulted} elapsed={state.elapsed}
-                cutaway={(view === "focus" && selected) || (asset.id === PROCESS_STAGES[carrierPose.stageIndex].id && ['load', 'unload', 'process'].includes(carrierPose.phase))} />}
+            {asset.kind === "lathe" ? <Lathe selected={selected} onSelect={onClick} faulted={faulted} active={active} elapsed={state.elapsed}
+              cutaway={(view === "focus" && selected) || cutting} /> :
+              <Mill selected={selected} onSelect={onClick} faulted={faulted} active={active} elapsed={state.elapsed}
+                cutaway={(view === "focus" && selected) || cutting} />}
           </group>
           {showLabels && <TagFromParent asset={asset} zone={zoneTitles[asset.zone] ?? ""} selected={selected}
             status={machine?.status ?? "idle"} onSelect={onClick} copy={copy} />}
@@ -237,26 +248,39 @@ export function WorkshopScene({
       })}
       {ROBOT_CELLS.map((cell, index) => {
         const asset = ASSETS.find(({ id }) => id === cell.id)!;
-        const pose = robotPose(state.elapsed, index);
+        const robot = production?.robots.find(item => item.id === cell.id);
+        const pose = robot ? { position: [robot.position[0], robot.position[2]] as [number, number], machineId: robot.machine_id ?? '' } : robotPose(state.elapsed, index);
         const machine = state.machines[pose.machineId];
         const rotation = asset.id === "R01" ? Math.PI / 2 : -Math.PI / 2;
         return <group key={asset.id}>
           <RobotRail position={[-3, cell.trackZ]} />
           <Robot asset={asset} machine={machine} rotation={rotation} position={pose.position}
-            elapsed={state.elapsed} showLabels={showLabels}
-            tip={PROCESS_STAGES[carrierPose.stageIndex].id === pose.machineId && ['load', 'unload'].includes(carrierPose.phase)
+            elapsed={production && robot?.status === 'idle' ? 0 : state.elapsed} showLabels={showLabels}
+            tip={production ? robot?.tip ?? undefined : PROCESS_STAGES[carrierPose.stageIndex].id === pose.machineId && ['load', 'unload'].includes(carrierPose.phase)
               ? carrierPose.workpiecePosition : undefined}
             selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />
         </group>;
       })}
       {ASSETS.filter(({ kind }) => kind === "amr").map((asset, index) => {
-        const pose = index === 0 ? carrierPose : amrPose(state.elapsed, index);
+        const carrier = production?.amrs.find(item => item.id === asset.id);
+        const pose = carrier ? { position: [carrier.position[0], carrier.position[2]] as [number, number], heading: carrier.heading } : index === 0 ? carrierPose : amrPose(state.elapsed, index);
         return <AMR key={asset.id} asset={asset} position={pose.position} heading={pose.heading}
           carrying={false} showLabels={showLabels} elapsed={state.elapsed}
           selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />;
       })}
-      <MovingWorkpiece position={carrierPose.workpiecePosition} stage={carrierPose.stageIndex}
-        rotating={carrierPose.phase === 'process'} elapsed={state.elapsed} onSelect={() => onSelect(WORKPIECE_ASSET)} />
+      {production ? production.parts.map(part => <group key={part.id}>
+        <MovingWorkpiece position={part.position} stage={part.stage_index}
+          rotating={part.status === 'processing' && !production.machines.some(m => m.part_id === part.id && m.status === 'fault')}
+          elapsed={state.elapsed} color={part.order_id === production.orders[0]?.id ? '#a4e6d0' : part.order_id === production.orders[1]?.id ? '#e9be79' : '#8fbfdf'}
+          onSelect={() => onSelect({ ...WORKPIECE_ASSET, id: part.id, name: { zh: `工件 ${part.id}`, en: `Part ${part.id}` } })} />
+        {selectedId === part.id && <mesh position={[part.position[0], part.position[1] - 0.3, part.position[2]]} rotation-x={-Math.PI / 2}>
+          <ringGeometry args={[0.45, 0.53, 24]} /><meshBasicMaterial color="#eff9bc" side={THREE.DoubleSide} />
+        </mesh>}
+      </group>) : <MovingWorkpiece position={carrierPose.workpiecePosition} stage={carrierPose.stageIndex}
+        rotating={carrierPose.phase === 'process'} elapsed={state.elapsed} onSelect={() => onSelect(WORKPIECE_ASSET)} />}
+      {production?.bottlenecks.slice(0, 3).map((item, i) => { const asset = ASSETS.find(a => a.id === item.resource); return asset ? <mesh key={`${item.resource}-${i}`} position={[asset.position[0], 0.15, asset.position[1]]} rotation-x={-Math.PI / 2}>
+        <ringGeometry args={[2.45, 2.55, 40]} /><meshBasicMaterial color="#e7a355" side={THREE.DoubleSide} transparent opacity={0.7} />
+      </mesh> : null; })}
       {ASSETS.filter(({ kind }) => !["lathe", "mill", "robot", "amr"].includes(kind)).map((asset) =>
         <StaticAsset key={asset.id} asset={asset} showLabels={showLabels} selected={selectedId === asset.id} onSelect={() => onSelect(asset)} />)}
       <OrbitControls ref={controls} makeDefault enableDamping enablePan={view !== "focus"} dampingFactor={0.07} minPolarAngle={0.12}
@@ -277,18 +301,26 @@ function TagFromParent({ asset, zone, selected, status, onSelect, copy }: {
     detail={zone} accent={colors[status] ?? colors.idle} active={selected} onClick={onSelect} />;
 }
 
-function MovingWorkpiece({ position, stage, rotating, elapsed, onSelect }: {
-  position: [number, number, number]; stage: number; rotating: boolean; elapsed: number; onSelect: () => void;
+function MovingWorkpiece({ position, stage, rotating, elapsed, onSelect, color = '#e8e6cf' }: {
+  position: [number, number, number]; stage: number; rotating: boolean; elapsed: number; onSelect: () => void; color?: string;
 }) {
   return <group name="tracked-workpiece" position={position} rotation-x={rotating ? elapsed * 3 : 0}
     onClick={(event) => { event.stopPropagation(); onSelect(); }}>
     <mesh castShadow rotation-z={Math.PI / 2}>
       <cylinderGeometry args={[stage < 2 ? 0.24 : 0.17, stage < 2 ? 0.24 : 0.17, 0.85, 24]} />
-      <meshStandardMaterial color="#e8e6cf" metalness={0.8} roughness={0.22} emissive="#c49f48" emissiveIntensity={0.35} />
+      <meshStandardMaterial color={color} metalness={0.8} roughness={0.22} emissive="#c49f48" emissiveIntensity={0.35} />
     </mesh>
     {stage >= 2 && [-0.24, 0.23].map((x) => <mesh key={x} position={[x, 0, 0]} rotation-z={Math.PI / 2}>
       <cylinderGeometry args={[0.26, 0.26, 0.12, 24]} />
       <meshStandardMaterial color="#c7d4cc" metalness={0.85} roughness={0.2} />
     </mesh>)}
   </group>;
+}
+
+function ProductionRoutes({ snapshot }: { snapshot: ProductionSnapshot }) {
+  return <group>{snapshot.amrs.filter(amr => amr.path.length).map(amr => {
+    const points = [amr.position, ...amr.path].map(([x, , z]) => [x, 0.2, z] as [number, number, number]);
+    return <Line key={amr.id} points={points}
+      color={amr.part_id ? '#7ce8bd' : '#81acc6'} lineWidth={2} dashed dashSize={0.5} gapSize={0.3} />;
+  })}</group>;
 }

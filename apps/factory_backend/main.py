@@ -39,6 +39,7 @@ from twin_runtime_core.clock import wall_now_iso  # noqa: E402
 
 from .guard import (WS_MAX_MSG_BYTES, WS_SEND_TIMEOUT_S, GuardMiddleware, client_key, origin_allowed,
                     request_host, ws_registry)  # noqa: E402  §50 公開部署防護
+from .workshop import router as workshop_router, service as workshop_service  # noqa: E402
 
 RUNS: dict[str, FactoryEngine] = {}
 SPEED = {"value": 1.0, "paused": False, "seq": 0}
@@ -58,11 +59,17 @@ async def lifespan(app):
     eng.preroll()
     RUNS["LIVE-001"] = eng
     task = asyncio.create_task(_ticker())
-    yield
-    task.cancel()
+    workshop_task = asyncio.create_task(workshop_service.ticker())
+    try:
+        yield
+    finally:
+        task.cancel()
+        workshop_task.cancel()
+        await asyncio.gather(task, workshop_task, return_exceptions=True)
 
 
 app = FastAPI(title="Robot Factory Digital Twin", version="0.10.2", lifespan=lifespan)
+app.include_router(workshop_router)
 # CORS：本機開發預設放行 vite dev（5173）；部署時以 TWIN_CORS_ORIGINS（逗號分隔）指定前端網域
 _origins = [o.strip() for o in os.environ.get("TWIN_CORS_ORIGINS", "http://localhost:5173").split(",")
             if o.strip()]

@@ -12,7 +12,11 @@ the scope of the added work, see [维修工单操作说明](docs/MAINTENANCE_ZH.
 This fork retains the upstream [MIT license](LICENSE) and attribution to
 [WayneChou-bot/RFTwin](https://github.com/WayneChou-bot/RFTwin).
 
-The standalone **精密加工车间 3D Demo** is available at `/workshop.html` when the frontend dev server is running. It demonstrates a complete illustrative machining route with world-anchored labels, visible machine internals and AMR circulation. See [车间 Demo 操作说明](docs/WORKSHOP_ZH.md); all scene motion and status are local demo behavior.
+## Order-driven machining workshop · 本仓库新增加工车间
+
+The **精密加工车间** at `/workshop.html` now runs an order-driven machining simulation on the existing FastAPI host. Two part families and three editable orders share six CNCs, two rail robots and two AMRs. The backend owns finite queues, setup, processing, transport, faults and per-part traces. Compare FIFO repair waiting, compatible-machine rerouting and due-date priority from isolated copies of one state, then explicitly apply a policy. Extra transfer and setup costs can make rerouting worse; results are reported as computed.
+
+The accepted local scene demo remains at `/workshop.html?mode=demo` (baseline tag `demo-baseline-v2`). Production mode requires the backend, freezes on disconnection and does not connect to real equipment. The original RFTwin application remains at `/`. See [加工车间操作说明、技术结构与演示边界](docs/WORKSHOP_ZH.md).
 
 **A browser-native digital twin of a robotic production line — backend-authoritative, deterministic, explainable.**
 Four process cells, 12 robot arms and an AMR fleet run in a Python simulation engine; the 3D factory in the browser only

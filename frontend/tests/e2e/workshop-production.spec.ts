@@ -1,0 +1,97 @@
+import { expect, test } from '@playwright/test';
+
+test('workshop production shell makes connection and demo mode explicit', async ({ page }) => {
+  await page.goto('/workshop.html');
+  await expect(page.getByTestId('production-app')).toBeVisible({ timeout: 8000 });
+  await expect(page.getByRole('link', { name: '场景演示', exact: true })).toBeVisible();
+  await expect(page.getByTestId('production-connection')).toBeVisible();
+  await page.getByRole('link', { name: '场景演示', exact: true }).click();
+  await expect(page.getByTestId('workshop-stage')).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('link', { name: '生产仿真', exact: true })).toBeVisible();
+});
+
+test.describe('workshop production with real backend', () => {
+  test.skip(!process.env.PW_WORKSHOP_LIVE, 'Requires dedicated real backend');
+  test('orders, actual transfers, fault comparison and apply form one loop', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width: 1680, height: 1050 });
+    await page.goto('/workshop.html');
+    await expect(page.getByTestId('production-connection')).toHaveAttribute('data-connected', 'true', { timeout: 30000 });
+    await page.getByRole('button', { name: '重置生产', exact: true }).click();
+    await expect(page.getByTestId('production-orders').locator('[data-order]')).toHaveCount(3);
+    const initial = await page.getByTestId('production-time').getAttribute('data-seconds');
+    await page.getByRole('button', { name: '推进60秒', exact: true }).click();
+    await expect(page.getByTestId('production-time')).not.toHaveAttribute('data-seconds', initial!);
+    await page.getByTestId('production-part-P001').click();
+    await expect(page.getByTestId('production-stage')).toHaveAttribute('data-selected', 'P001');
+    await expect(page.getByTestId('part-trace')).toContainText('P001');
+    await page.getByTestId('production-asset-select').selectOption('L01');
+    await page.getByRole('button', { name: '注入故障', exact: true }).click();
+    await expect(page.getByTestId('production-machine-status')).toContainText('故障');
+    const before = await page.getByTestId('production-time').getAttribute('data-seconds');
+    await page.getByRole('button', { name: '比较恢复方案', exact: true }).click();
+    await expect(page.getByTestId('recovery-comparison')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId('recovery-comparison').locator('[data-policy]')).toHaveCount(3);
+    expect(await page.getByTestId('production-time').getAttribute('data-seconds')).toBe(before);
+    await page.screenshot({ path: 'test-results/workshop-production-comparison.png', fullPage: true });
+    await page.getByTestId('apply-reroute').click();
+    await expect(page.getByTestId('production-policy')).toContainText('兼容机床改派');
+    await expect(page.getByTestId('recovery-comparison')).toHaveCount(0);
+    await page.getByRole('button', { name: '推进60秒', exact: true }).click();
+    await expect(page.getByTestId('production-time')).toHaveAttribute('data-seconds', '120');
+    await page.getByRole('button', { name: '等轴视角', exact: true }).click();
+    await page.screenshot({ path: 'test-results/workshop-production.png', fullPage: true });
+    await page.setViewportSize({ width: 820, height: 1100 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: 'test-results/workshop-production-narrow.png', fullPage: true });
+    expect(errors).toEqual([]);
+  });
+  test('editable orders reset production with validated quantities and due times', async ({ page }) => {
+    await page.goto('/workshop.html');
+    await expect(page.getByTestId('production-connection')).toHaveAttribute('data-connected', 'true');
+    await page.getByRole('button', { name: '订单设置', exact: true }).click();
+    await page.getByLabel('ORD-001 数量').fill('2');
+    await page.getByLabel('ORD-001 交期秒数').fill('1200');
+    await page.getByRole('button', { name: '按设置重新开始', exact: true }).click();
+    await expect(page.getByTestId('order-ORD-001')).toContainText('0 / 2');
+    await expect(page.getByRole('button', { name: '开始生产', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '开始生产', exact: true }).click();
+    await expect(page.getByRole('button', { name: '暂停生产', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '暂停生产', exact: true }).click();
+  });
+  test('shared resets refresh settings and downstream stations omit unsupported faults', async ({ page, context }) => {
+    await page.goto('/workshop.html');
+    await expect(page.getByTestId('production-connection')).toHaveAttribute('data-connected', 'true');
+    await page.getByTestId('production-asset-select').selectOption('D01');
+    await expect(page.getByRole('button', { name: '注入故障', exact: true })).toHaveCount(0);
+    const reset = await context.request.post('/api/workshop/reset', { data: { orders: [{ id: 'SHARED', part_type: 'sleeve', quantity: 3, due_seconds: 900 }] } });
+    expect(reset.ok()).toBeTruthy();
+    await expect(page.getByTestId('order-SHARED')).toBeVisible();
+    await page.getByRole('button', { name: '订单设置', exact: true }).click();
+    await expect(page.getByLabel('SHARED 数量')).toHaveValue('3');
+    await expect(page.getByLabel('SHARED 交期秒数')).toHaveValue('900');
+    await context.request.post('/api/workshop/reset', { data: {} });
+    await expect(page.getByRole('dialog', { name: '订单设置', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Switch to English' }).click();
+    await expect(page.getByRole('button', { name: 'Start production', exact: true })).toBeVisible();
+    await expect(page.getByTestId('production-part-P001')).toBeVisible();
+  });
+  test('all configured orders finish and part tracking stays centered at delivered inventory', async ({ page, context }) => {
+    await page.goto('/workshop.html');
+    await expect(page.getByTestId('production-connection')).toHaveAttribute('data-connected', 'true');
+    await page.getByRole('button', { name: '重置生产', exact: true }).click();
+    const advanced = await context.request.post('/api/workshop/control', { data: { advance_seconds: 1800 } });
+    expect(advanced.ok()).toBeTruthy();
+    const finished = await advanced.json();
+    expect(finished.complete).toBeTruthy();
+    expect(finished.metrics.completed_parts).toBe(finished.metrics.total_parts);
+    await expect(page.getByTestId('order-ORD-001')).toContainText('4 / 4');
+    await expect(page.getByRole('button', { name: '开始生产', exact: true })).toBeDisabled();
+    await page.getByTestId('production-part-P002').click();
+    await expect(page.getByTestId('part-trace')).toContainText('FG');
+    await expect.poll(async () => Math.abs(Number(await page.locator('canvas').getAttribute('data-focus-x')))).toBeLessThan(.01);
+    await expect.poll(async () => Math.abs(Number(await page.locator('canvas').getAttribute('data-focus-y')))).toBeLessThan(.01);
+    await page.screenshot({ path: 'test-results/workshop-production-delivered.png', fullPage: true });
+  });
+});

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 async function openWorkshop(page: import("@playwright/test").Page) {
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.goto("/workshop.html");
+  await page.goto("/workshop.html?mode=demo");
   await expect(page.locator(".shop-brand strong")).toHaveText("精密加工车间", { timeout: 10_000 });
   await expect(page.getByTestId("workshop-stage")).toHaveAttribute("data-ready", "true");
 }
@@ -57,6 +57,8 @@ test("selecting an asset recenters the camera on its world position", async ({ p
 
 test("a workpiece rides AMR01 along the transfer route", async ({ page }) => {
   await openWorkshop(page);
+  await page.getByRole('button', { name: '重置模拟', exact: true }).click();
+  await page.getByRole('button', { name: '暂停模拟', exact: true }).click();
   const stage = page.getByTestId("workshop-stage");
   await expect(stage).toHaveAttribute("data-carrier", "AMR01");
   await expect(page.getByTestId('carrier-stage')).toContainText('原料');
@@ -65,7 +67,7 @@ test("a workpiece rides AMR01 along the transfer route", async ({ page }) => {
   await page.getByRole('button', { name: '跟随工件', exact: true }).click();
   await expect(page.getByTestId('selected-id')).toHaveText('P001');
   const start = await stage.getAttribute("data-carrier-position");
-  await page.waitForTimeout(900);
+  await page.getByRole('button', { name: '继续模拟', exact: true }).click();
   await expect(stage).not.toHaveAttribute("data-carrier-position", start ?? "");
   await expect(page.getByTestId("carrier-stage")).toContainText("AMR01");
 });
@@ -80,12 +82,16 @@ test("the two tending robots expose their three-machine service cells", async ({
 
 test('one part is handed off in sequence at every processing station', async ({ page }) => {
   await openWorkshop(page);
+  await page.getByRole('button', { name: '重置模拟', exact: true }).click();
+  await page.getByRole('button', { name: '暂停模拟', exact: true }).click();
   await page.getByRole('button', { name: '等轴视角', exact: true }).click();
   await page.screenshot({ path: 'test-results/workshop-flat-labels-overview.png', fullPage: true });
   for (const station of ['数控车削', '加工中心', '去毛刺', '清洗', '尺寸检验', '成品']) {
     await page.getByRole('button', { name: '下一工序', exact: true }).click();
     await expect(page.getByTestId('carrier-stage')).toContainText(station);
+    await page.getByRole('button', { name: '继续模拟', exact: true }).click();
     await expect(page.getByTestId('workshop-stage')).toHaveAttribute('data-carrier-phase', 'unload', { timeout: 6000 });
+    await page.getByRole('button', { name: '暂停模拟', exact: true }).click();
     if (station === '数控车削') {
       await page.getByTestId('asset-item-R01').click();
       await page.screenshot({ path: 'test-results/workshop-robot-handoff.png', fullPage: true });
