@@ -12,6 +12,7 @@ __pycache__/
 frontend/test-results/
 frontend/playwright-report/
 # local
+/tmp/
 *.log
 .env
 .env.*

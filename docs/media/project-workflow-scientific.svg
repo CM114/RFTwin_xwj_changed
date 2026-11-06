@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1690" viewBox="0 0 1600 1690" role="img" aria-labelledby="title desc">
+<title id="title">机加工车间数字孪生与生产调度仿真系统流程图</title>
+<desc id="desc">黑白简洁流程图，展示订单配置、工艺路线、资源调度、故障处理、生产展示与记录。</desc>
+<defs>
+ <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#111"/></marker>
+ <style>
+ text{font-family:'Microsoft YaHei','Noto Sans CJK SC',sans-serif;fill:#111}.title{font-size:34px;font-weight:700}.subtitle{font-size:17px;fill:#444}.section{font-size:21px;font-weight:700}.nodeTitle{font-size:20px;font-weight:700}.body{font-size:16px;fill:#333}.small{font-size:14px;fill:#333}.box{fill:#fff;stroke:#111;stroke-width:2}.soft{fill:#f5f5f5;stroke:#111;stroke-width:2}.line{fill:none;stroke:#111;stroke-width:2.3;marker-end:url(#arrow)}.plain{fill:none;stroke:#111;stroke-width:2.3}
+ </style>
+</defs>
+<rect width="1600" height="1690" fill="#fff"/>
+<text x="60" y="68" class="title">机加工车间数字孪生与生产调度仿真系统</text>
+<text x="62" y="103" class="subtitle">系统总体流程｜订单驱动的生产仿真、资源调度、故障恢复与运行记录</text>
+<path d="M60 128H1540" class="plain"/>
+
+<text x="60" y="174" class="section">01 订单配置与仿真启动</text>
+<rect x="60" y="195" width="340" height="112" rx="8" class="box"/><text x="84" y="232" class="nodeTitle">配置生产订单</text><text x="84" y="266" class="body">零件类型、数量、交期、派工策略</text>
+<path d="M400 251H438" class="line"/>
+<rect x="450" y="195" width="300" height="112" rx="8" class="box"/><text x="474" y="232" class="nodeTitle">校验并初始化</text><text x="474" y="266" class="body">检查参数，生成工件与工艺路线</text>
+<path d="M750 251H788" class="line"/>
+<rect x="800" y="195" width="300" height="112" rx="8" class="soft"/><text x="824" y="232" class="nodeTitle">后端仿真引擎</text><text x="824" y="266" class="body">统一时钟，推进加工与搬运事件</text>
+<path d="M1100 251H1138" class="line"/>
+<rect x="1150" y="195" width="390" height="112" rx="8" class="box"/><text x="1174" y="232" class="nodeTitle">仿真运行</text><text x="1174" y="266" class="body">持续更新设备、工件及订单状态</text>
+
+<text x="60" y="366" class="section">02 按零件类型确定工艺路线</text>
+<path d="M1345 307V342H800V384" class="line"/>
+<polygon points="800,386 824,410 800,434 776,410" class="box"/><text x="800" y="415" text-anchor="middle" class="small">分流</text>
+<path d="M780 428C710 449 430 445 430 468" class="line"/><path d="M820 428C890 449 1170 445 1170 468" class="line"/>
+<rect x="100" y="468" width="660" height="154" rx="8" class="soft"/><text x="128" y="508" class="nodeTitle">阶梯轴</text><text x="128" y="548" class="body">原料 → 车削 → 铣削 → 去毛刺 → 清洗 → 尺寸检验</text><text x="128" y="587" class="small">检验合格后转为成品</text>
+<rect x="840" y="468" width="660" height="154" rx="8" class="soft"/><text x="868" y="508" class="nodeTitle">轴套</text><text x="868" y="548" class="body">原料 → 车削 → 去毛刺 → 清洗 → 尺寸检验</text><text x="868" y="587" class="small">检验合格后转为成品</text>
+
+<text x="60" y="680" class="section">03 资源调度与工序执行</text>
+<text x="60" y="710" class="small">工件按工艺路线进入调度队列；资源繁忙时等待，工序完成后转入下一道工序。</text>
+<rect x="60" y="735" width="330" height="138" rx="8" class="box"/><text x="84" y="773" class="nodeTitle">设备与缓存分配</text><text x="84" y="807" class="body">检查设备兼容性与缓存容量</text><text x="84" y="840" class="small">资源繁忙时排队等待</text>
+<path d="M390 804H425" class="line"/>
+<rect x="438" y="735" width="330" height="138" rx="8" class="box"/><text x="462" y="773" class="nodeTitle">机械臂上下料</text><text x="462" y="807" class="body">按服务范围抓取、放置工件</text><text x="462" y="840" class="small">动作过程计入仿真时间</text>
+<path d="M768 804H803" class="line"/>
+<rect x="816" y="735" width="330" height="138" rx="8" class="box"/><text x="840" y="773" class="nodeTitle">AMR工位间运输</text><text x="840" y="807" class="body">按任务转运并检查路线冲突</text><text x="840" y="840" class="small">无冲突时允许并行行驶</text>
+<path d="M1146 804H1181" class="line"/>
+<rect x="1194" y="735" width="346" height="138" rx="8" class="soft"/><text x="1218" y="773" class="nodeTitle">加工与质量检验</text><text x="1218" y="807" class="body">机床加工、清洗、尺寸检验</text><text x="1218" y="840" class="small">完成当前工序后继续流转</text>
+
+<text x="60" y="955" class="section">04 故障处理与订单完工</text>
+<path d="M1367 873V906H800V934" class="line"/>
+<polygon points="800,938 910,987 800,1036 690,987" class="box"/><text x="800" y="993" text-anchor="middle" class="body">设备故障？</text>
+<path d="M690 987H410V1086" class="line"/><text x="548" y="974" class="body">是</text>
+<path d="M910 987H1190V1086" class="line"/><text x="1038" y="974" class="body">否</text>
+<rect x="120" y="1090" width="580" height="142" rx="8" class="soft"/><text x="148" y="1129" class="nodeTitle">故障处理与生产恢复</text><text x="148" y="1163" class="body">暂停受影响工序，保留工件位置和加工履历</text><text x="148" y="1197" class="small">等待维修或改派兼容设备；恢复后重新调度</text>
+<rect x="900" y="1090" width="580" height="142" rx="8" class="box"/><text x="928" y="1129" class="nodeTitle">继续生产与订单交付</text><text x="928" y="1163" class="body">工序未完成：返回调度队列并执行下一工序</text><text x="928" y="1197" class="small">全部工序完成：成品入库并更新交付指标</text>
+
+<g transform="translate(0 50)">
+<text x="60" y="1260" class="section">05 运行状态展示与生产留痕</text>
+<text x="60" y="1290" class="small">系统运行过程中同步提供以下功能：</text>
+<rect x="60" y="1315" width="480" height="174" rx="8" class="box"/><text x="88" y="1358" class="nodeTitle">调度方案比较</text><text x="88" y="1395" class="body">对比FIFO、设备改派与交期优先</text><text x="88" y="1430" class="small">应用策略后影响后续派工</text>
+<rect x="560" y="1315" width="480" height="174" rx="8" class="soft"/><text x="588" y="1358" class="nodeTitle">3D数字孪生与生产面板</text><text x="588" y="1395" class="body">显示设备状态、工件位置、队列与物流</text><text x="588" y="1430" class="small">查看工件订单和加工履历</text>
+<rect x="1060" y="1315" width="480" height="174" rx="8" class="box"/><text x="1088" y="1358" class="nodeTitle">SQLite生产记录</text><text x="1088" y="1395" class="body">保存仿真状态、批次与事件履历</text><text x="1088" y="1430" class="small">支持历史批次查看与暂停恢复</text>
+<text x="60" y="1550" class="small">系统为确定性软件仿真，不控制真实机床、PLC或机器人；工艺、节拍和故障参数为示例设置。</text>
+</g>
+</svg>
